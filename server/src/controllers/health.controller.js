@@ -33,9 +33,10 @@ class HealthController {
           },
         };
 
-        // If any service is down, mark overall status as degraded
-        if (!dbStatus || !mqttStatus.connected) {
-          health.status = 'degraded';
+        // For Docker healthcheck, only database connectivity matters
+        // MQTT can be disconnected and that's OK
+        if (!dbStatus) {
+          health.status = 'error';
           res.status(503);
         } else {
           res.status(200);

@@ -21,104 +21,125 @@ class MqttService extends EventEmitter {
   connect(brokerUrl, options = {}) {
     return new Promise((resolve, reject) => {
       try {
-        // Generate unique client ID
-        this.clientId = `galgo-api-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-        const defaultOptions = {
-          clientId: this.clientId,
-          clean: true,
-          connectTimeout: 4000,
-          reconnectPeriod: 1000,
-          keepalive: 60,
-          ...options
-        };
-
-        console.log(`Connecting to MQTT broker: ${brokerUrl}`);
-        this.client = mqtt.connect(brokerUrl, defaultOptions);
-        this.broker = brokerUrl;
-
-        // Connection successful
-        this.client.on('connect', () => {
-          console.log(`✅ Connected to MQTT broker: ${brokerUrl}`);
-          this.isConnected = true;
-          this.emit('connected', { broker: brokerUrl, clientId: this.clientId });
-
-          // Re-subscribe to active topics
-          this.resubscribeToActiveTopics();
-
+        // If already connected to the same broker, just resolve
+        if (this.client && this.isConnected && this.broker === brokerUrl) {
+          console.log(`✅ Already connected to MQTT broker: ${brokerUrl}`);
           resolve({ success: true, broker: brokerUrl, clientId: this.clientId });
-        });
+          return;
+        }
 
-        // Connection error
-        this.client.on('error', (error) => {
-          console.error('❌ MQTT connection error:', error.message);
-          this.isConnected = false;
-          this.emit('error', error);
-          
-          // Don't reject if promise already resolved
-          if (reject) {
-            reject(error);
-            reject = null; // Prevent multiple calls
-          }
-        });
-
-        // Connection close
-        this.client.on('close', () => {
-          console.log('🔌 MQTT connection closed');
-          this.isConnected = false;
-          this.emit('disconnected');
-        });
-
-        // Connection offline
-        this.client.on('offline', () => {
-          console.log('📡 MQTT client offline');
-          this.isConnected = false;
-          this.emit('offline');
-        });
-
-        // Connection timeout
-        this.client.on('end', () => {
-          console.log('🔌 MQTT connection ended');
-          this.isConnected = false;
-        });
-
-        // Prevent uncaught exceptions
-        this.client.on('disconnect', () => {
-          console.log('🔌 MQTT disconnected');
-          this.isConnected = false;
-          this.emit('disconnected');
-        });
-
-        // Reconnect
-        this.client.on('reconnect', () => {
-          console.log('🔄 MQTT reconnecting...');
-          this.emit('reconnecting');
-        });
-
-        // Message received
-        this.client.on('message', (topic, message, packet) => {
-          const messageData = {
-            topic,
-            message: message.toString(),
-            qos: packet.qos,
-            retain: packet.retain,
-            timestamp: new Date().toISOString()
-          };
-
-          // Store message
-          this.messages.unshift(messageData);
-          if (this.messages.length > this.maxMessages) {
-            this.messages = this.messages.slice(0, this.maxMessages);
-          }
-
-          console.log(`�� MQTT message received: ${topic} -> ${message.toString()}`);
-          this.emit('message', messageData);
-        });
-
+        // Disconnect existing connection if any (but only if broker changed or not connected)
+        if (this.client && (this.broker !== brokerUrl || !this.isConnected)) {
+          console.log('🔌 Disconnecting existing MQTT connection before creating new one...');
+          this.client.end(true, () => {
+            this.client = null;
+            this.isConnected = false;
+            this.proceedWithConnection(brokerUrl, options, resolve, reject);
+          });
+        } else {
+          this.proceedWithConnection(brokerUrl, options, resolve, reject);
+        }
       } catch (error) {
         console.error('❌ Error creating MQTT client:', error);
         reject(error);
       }
+    });
+  }
+
+  /**
+   * Proceed with MQTT connection after ensuring no existing connection
+   * @private
+   */
+  proceedWithConnection(brokerUrl, options, resolve, reject) {
+    // Generate unique client ID
+    this.clientId = `galgo-api-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const defaultOptions = {
+      clientId: this.clientId,
+      clean: false, // Keep session for persistent connection
+      connectTimeout: 10000, // Longer timeout
+      reconnectPeriod: 5000, // Reconnect every 5 seconds if disconnected
+      keepalive: 120, // Keep connection alive with 2-minute ping interval
+      resubscribe: true, // Automatically resubscribe on reconnect
+      ...options
+    };
+
+    console.log(`Connecting to MQTT broker: ${brokerUrl}`);
+    this.client = mqtt.connect(brokerUrl, defaultOptions);
+    this.broker = brokerUrl;
+
+    // Connection successful
+    this.client.on('connect', () => {
+      console.log(`✅ Connected to MQTT broker: ${brokerUrl}`);
+      this.isConnected = true;
+      this.emit('connected', { broker: brokerUrl, clientId: this.clientId });
+
+      // Re-subscribe to active topics
+      this.resubscribeToActiveTopics();
+
+      resolve({ success: true, broker: brokerUrl, clientId: this.clientId });
+    });
+
+    // Connection error
+    this.client.on('error', (error) => {
+      console.error('❌ MQTT connection error:', error.message);
+      this.isConnected = false;
+      this.emit('error', error);
+      
+      reject(error);
+    });
+
+    // Connection close
+    this.client.on('close', () => {
+      console.log('🔌 MQTT connection closed');
+      this.isConnected = false;
+      this.emit('disconnected');
+    });
+
+    // Connection offline
+    this.client.on('offline', () => {
+      console.log('📡 MQTT client offline');
+      this.isConnected = false;
+      this.emit('offline');
+    });
+
+    // Connection timeout
+    this.client.on('end', () => {
+      console.log('🔌 MQTT connection ended');
+      this.isConnected = false;
+    });
+
+    // Prevent uncaught exceptions
+    this.client.on('disconnect', () => {
+      console.log('🔌 MQTT disconnected');
+      this.isConnected = false;
+      this.emit('disconnected');
+    });
+
+    // Reconnect
+    this.client.on('reconnect', () => {
+      console.log('🔄 MQTT reconnecting...');
+      this.emit('reconnecting');
+    });
+
+    // Message received
+    this.client.on('message', (topic, message, packet) => {
+      const messageData = {
+        topic,
+        message: message.toString(),
+        qos: packet.qos,
+        retain: packet.retain,
+        timestamp: new Date().toISOString()
+      };
+
+      // Store message
+      this.messages.unshift(messageData);
+      if (this.messages.length > this.maxMessages) {
+        this.messages = this.messages.slice(0, this.maxMessages);
+      }
+
+      console.log(`📨 MQTT message received: ${topic} -> ${message.toString()}`);
+      this.emit('message', messageData);
     });
   }
 

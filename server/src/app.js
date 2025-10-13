@@ -16,16 +16,16 @@ const app = express();
 // Initialize database
 initializeDatabase();
 
-// Optional: Auto-connect to MQTT broker on startup
-if (appConfig.mqtt.broker && appConfig.mqtt.broker !== 'mqtt://100.107.238.60:1883') {
-  console.log('🔄 Attempting to auto-connect to MQTT broker...');
+// Auto-connect to MQTT broker on startup (persistent connection)
+if (appConfig.mqtt.broker) {
+  console.log('🔄 Auto-connecting to MQTT broker...');
   mqttService.connect(appConfig.mqtt.broker, {
     username: appConfig.mqtt.username,
     password: appConfig.mqtt.password,
-    clientId: appConfig.mqtt.clientId,
+    // do not pass a fixed clientId here so each instance gets a unique id
   }).catch(error => {
     console.log('⚠️ Auto-connection to MQTT broker failed:', error.message);
-    console.log('Manual connection will be available via API');
+    console.log('Will retry connection automatically');
   });
 }
 

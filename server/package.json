@@ -2,9 +2,9 @@
   "name": "galgo-school-server",
   "version": "1.0.0",
   "description": "API backend para Galgo School con soporte MQTT",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node server.js",
     "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
