@@ -1,5 +1,10 @@
 name: Deploy to Self-Hosted Runner
 
+on:
+  push:
+    branches:
+      - main
+
 # Trigger on push to main
 
 jobs:
