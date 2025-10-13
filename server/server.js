@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 const mqtt = require('mqtt');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpecs = require('./swagger');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -13,6 +15,12 @@ const MQTT_CLIENT_ID = 'galgo-school-server';
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Swagger UI
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'Galgo School API Documentation',
+}));
 
 // SQLite database
 const db = new sqlite3.Database('./sensors.db', (err) => {
@@ -139,6 +147,37 @@ function initMQTT() {
 initMQTT();
 
 // Routes
+
+/**
+ * @swagger
+ * /api/sensors:
+ *   get:
+ *     summary: Obtener todos los sensores
+ *     tags: [Sensors]
+ *     responses:
+ *       200:
+ *         description: Lista de sensores
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sensors:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                       type:
+ *                         type: string
+ *                       name:
+ *                         type: string
+ *                       data:
+ *                         type: string
+ *       500:
+ *         description: Error del servidor
+ */
 app.get('/api/sensors', (req, res) => {
   db.all('SELECT * FROM sensors', [], (err, rows) => {
     if (err) {
@@ -149,6 +188,44 @@ app.get('/api/sensors', (req, res) => {
   });
 });
 
+/**
+ * @swagger
+ * /api/sensors:
+ *   post:
+ *     summary: Crear un nuevo sensor
+ *     tags: [Sensors]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - type
+ *               - name
+ *             properties:
+ *               type:
+ *                 type: string
+ *                 example: environmental
+ *               name:
+ *                 type: string
+ *                 example: Sensor Temperatura
+ *               data:
+ *                 type: object
+ *                 example: { "location": "Lab 1" }
+ *     responses:
+ *       200:
+ *         description: Sensor creado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *       500:
+ *         description: Error del servidor
+ */
 app.post('/api/sensors', (req, res) => {
   const { type, name, data } = req.body;
   db.run('INSERT INTO sensors (type, name, data) VALUES (?, ?, ?)', [type, name, JSON.stringify(data)], function(err) {
@@ -161,6 +238,30 @@ app.post('/api/sensors', (req, res) => {
 });
 
 // Recording endpoints
+
+/**
+ * @swagger
+ * /api/recording/start:
+ *   post:
+ *     summary: Iniciar grabación
+ *     tags: [Recording]
+ *     responses:
+ *       200:
+ *         description: Grabación iniciada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 sessionId:
+ *                   type: number
+ *                 startTime:
+ *                   type: string
+ *                 message:
+ *                   type: string
+ */
 app.post('/api/recording/start', (req, res) => {
   const startTime = new Date().toISOString();
   const sessionId = Date.now(); // Simple session ID based on timestamp
@@ -176,6 +277,35 @@ app.post('/api/recording/start', (req, res) => {
   });
 });
 
+/**
+ * @swagger
+ * /api/recording/stop:
+ *   post:
+ *     summary: Detener grabación
+ *     tags: [Recording]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               sessionId:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Grabación detenida
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 endTime:
+ *                   type: string
+ *                 message:
+ *                   type: string
+ */
 app.post('/api/recording/stop', (req, res) => {
   const endTime = new Date().toISOString();
   const { sessionId } = req.body || {};
@@ -191,6 +321,28 @@ app.post('/api/recording/stop', (req, res) => {
 });
 
 // MQTT endpoints
+
+/**
+ * @swagger
+ * /api/mqtt/status:
+ *   get:
+ *     summary: Obtener estado de conexión MQTT
+ *     tags: [MQTT]
+ *     responses:
+ *       200:
+ *         description: Estado de MQTT
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 connected:
+ *                   type: boolean
+ *                 broker:
+ *                   type: string
+ *                 clientId:
+ *                   type: string
+ */
 app.get('/api/mqtt/status', (req, res) => {
   res.json({
     connected: mqttClient && mqttClient.connected,
@@ -227,6 +379,54 @@ app.post('/api/mqtt/disconnect', (req, res) => {
   });
 });
 
+/**
+ * @swagger
+ * /api/mqtt/topics:
+ *   get:
+ *     summary: Obtener todos los topics MQTT
+ *     tags: [MQTT]
+ *     responses:
+ *       200:
+ *         description: Lista de topics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 topics:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *   post:
+ *     summary: Crear un nuevo topic MQTT
+ *     tags: [MQTT]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - topic
+ *             properties:
+ *               topic:
+ *                 type: string
+ *                 example: sensors/temperature
+ *               description:
+ *                 type: string
+ *                 example: Topic para sensores de temperatura
+ *               qos:
+ *                 type: integer
+ *                 example: 0
+ *               retained:
+ *                 type: boolean
+ *                 example: false
+ *     responses:
+ *       200:
+ *         description: Topic creado
+ *       409:
+ *         description: Topic ya existe
+ */
 // MQTT Topics CRUD
 app.get('/api/mqtt/topics', (req, res) => {
   db.all('SELECT * FROM mqtt_topics ORDER BY created_at DESC', [], (err, rows) => {
@@ -332,6 +532,40 @@ app.delete('/api/mqtt/topics/:id', (req, res) => {
   });
 });
 
+/**
+ * @swagger
+ * /api/mqtt/publish:
+ *   post:
+ *     summary: Publicar un mensaje MQTT
+ *     tags: [MQTT]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - topic
+ *               - message
+ *             properties:
+ *               topic:
+ *                 type: string
+ *                 example: sensors/temperature
+ *               message:
+ *                 type: string
+ *                 example: "25.5"
+ *               qos:
+ *                 type: integer
+ *                 example: 0
+ *               retain:
+ *                 type: boolean
+ *                 example: false
+ *     responses:
+ *       200:
+ *         description: Mensaje publicado
+ *       503:
+ *         description: Cliente MQTT no conectado
+ */
 // Publish MQTT message
 app.post('/api/mqtt/publish', (req, res) => {
   const { topic, message, qos, retain } = req.body;
@@ -354,6 +588,37 @@ app.post('/api/mqtt/publish', (req, res) => {
   });
 });
 
+/**
+ * @swagger
+ * /api/mqtt/messages:
+ *   get:
+ *     summary: Obtener historial de mensajes MQTT
+ *     tags: [MQTT]
+ *     parameters:
+ *       - in: query
+ *         name: topic
+ *         schema:
+ *           type: string
+ *         description: Filtrar por topic
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Número máximo de mensajes
+ *     responses:
+ *       200:
+ *         description: Lista de mensajes
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 messages:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ */
 // Get MQTT messages history
 app.get('/api/mqtt/messages', (req, res) => {
   const { topic, limit = 50 } = req.query;
