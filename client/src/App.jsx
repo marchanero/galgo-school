@@ -8,6 +8,9 @@ import MqttStatusCard from './components/MqttStatusCard'
 import RecordingControl from './components/RecordingControl'
 import { useFormValidation, validationRules } from './hooks/useFormValidation'
 
+// API URL from environment variable or default
+const API_URL = import.meta.env.VITE_API_URL || '${API_URL}'
+
 function App() {
   const [sensors, setSensors] = useState([])
   const [newSensor, setNewSensor] = useState({ type: '', name: '', data: {} })
@@ -85,7 +88,7 @@ function App() {
   // Load configurations from API
   const loadConfigurations = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/configurations')
+      const response = await fetch(`${API_URL}/api/configurations`)
       if (response.ok) {
         const data = await response.json()
         const loadedConfigs = data.configurations || {}
@@ -126,7 +129,7 @@ function App() {
   // Save configurations to API
   const saveConfigurations = async (category, key, value) => {
     try {
-      const response = await fetch('http://localhost:3001/api/configurations', {
+      const response = await fetch('${API_URL}/api/configurations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category, key, value })
@@ -148,7 +151,7 @@ function App() {
   // Save all configurations to API
   const saveAllConfigurations = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/configurations/bulk', {
+      const response = await fetch('${API_URL}/api/configurations/bulk', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ configurations })
@@ -392,7 +395,7 @@ function App() {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch('http://localhost:3001/api/sensors')
+      const response = await fetch('${API_URL}/api/sensors')
       if (!response.ok) {
         throw new Error('Failed to fetch sensors')
       }
@@ -449,7 +452,7 @@ function App() {
     }
 
     try {
-      const response = await fetch('http://localhost:3001/api/sensors', {
+      const response = await fetch('${API_URL}/api/sensors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sensorData)
@@ -483,7 +486,7 @@ function App() {
       })
 
       // Call API to start recording on server
-      const response = await fetch('http://localhost:3001/api/recording/start', {
+      const response = await fetch('${API_URL}/api/recording/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -518,7 +521,7 @@ function App() {
       })
 
       // Call API to stop recording on server
-      const response = await fetch('http://localhost:3001/api/recording/stop', {
+      const response = await fetch('${API_URL}/api/recording/stop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -558,7 +561,7 @@ function App() {
   // MQTT Functions
   const fetchMqttStatus = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/mqtt/status')
+      const response = await fetch('${API_URL}/api/mqtt/status')
       if (response.ok) {
         const data = await response.json()
         setMqttStatus(data)
@@ -570,7 +573,7 @@ function App() {
 
   const fetchMqttTopics = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/mqtt/topics')
+      const response = await fetch('${API_URL}/api/mqtt/topics')
       if (response.ok) {
         const data = await response.json()
         setMqttTopics(data.topics)
@@ -582,7 +585,7 @@ function App() {
 
   const fetchMqttMessages = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/mqtt/messages?limit=20')
+      const response = await fetch('${API_URL}/api/mqtt/messages?limit=20')
       if (response.ok) {
         const data = await response.json()
         setMqttMessages(data.messages)
@@ -606,7 +609,7 @@ function App() {
     })
 
     try {
-      const response = await fetch('http://localhost:3001/api/mqtt/connect', {
+      const response = await fetch('${API_URL}/api/mqtt/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ broker: mqttBroker })
@@ -647,7 +650,7 @@ function App() {
     })
 
     try {
-      const response = await fetch('http://localhost:3001/api/mqtt/disconnect', {
+      const response = await fetch('${API_URL}/api/mqtt/disconnect', {
         method: 'POST'
       })
 
@@ -695,7 +698,7 @@ function App() {
     })
 
     try {
-      const response = await fetch('http://localhost:3001/api/mqtt/topics', {
+      const response = await fetch('${API_URL}/api/mqtt/topics', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(topicForm.values)
@@ -733,7 +736,7 @@ function App() {
   const updateMqttTopic = async (id, updates) => {
     setMqttLoading(true)
     try {
-      const response = await fetch(`http://localhost:3001/api/mqtt/topics/${id}`, {
+      const response = await fetch(`${API_URL}/api/mqtt/topics/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
@@ -775,7 +778,7 @@ function App() {
     })
 
     try {
-      const response = await fetch(`http://localhost:3001/api/mqtt/topics/${id}`, {
+      const response = await fetch(`${API_URL}/api/mqtt/topics/${id}`, {
         method: 'DELETE'
       })
 
@@ -823,7 +826,7 @@ function App() {
     })
 
     try {
-      const response = await fetch('http://localhost:3001/api/mqtt/publish', {
+      const response = await fetch('${API_URL}/api/mqtt/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(messageForm.values)
