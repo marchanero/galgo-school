@@ -164,6 +164,81 @@ initMQTT();
 
 /**
  * @swagger
+ * /api/health:
+ *   get:
+ *     summary: Health check endpoint
+ *     tags: [Health]
+ *     responses:
+ *       200:
+ *         description: Server is healthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: ok
+ *                 timestamp:
+ *                   type: string
+ *                 uptime:
+ *                   type: number
+ *                 services:
+ *                   type: object
+ *                 environment:
+ *                   type: object
+ *       503:
+ *         description: Server is unhealthy
+ */
+app.get('/api/health', (req, res) => {
+  try {
+    // Test database connection
+    db.get('SELECT 1', [], (err) => {
+      const dbStatus = !err;
+
+      const health = {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        services: {
+          database: {
+            status: dbStatus ? 'connected' : 'disconnected',
+            error: err ? err.message : null,
+          },
+          mqtt: {
+            status: mqttClient && mqttClient.connected ? 'connected' : 'disconnected',
+            broker: MQTT_BROKER,
+            clientId: MQTT_CLIENT_ID,
+          },
+        },
+        environment: {
+          nodeEnv: process.env.NODE_ENV || 'development',
+          port: PORT,
+        },
+      };
+
+      // If any service is down, mark overall status as degraded
+      if (!dbStatus) {
+        health.status = 'degraded';
+        res.status(503);
+      } else {
+        res.status(200);
+      }
+
+      res.json(health);
+    });
+  } catch (error) {
+    console.error('Health check error:', error);
+    res.status(503).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * @swagger
  * /api/sensors:
  *   get:
  *     summary: Obtener todos los sensores
