@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # Galgo-School Backend
   galgo-server:
     build:
       context: ./server
@@ -17,7 +16,6 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
-  # Galgo-School Frontend
   galgo-client:
     build:
       context: ./client
@@ -34,5 +32,4 @@ services:
 
 networks:
   default:
-    name: galgo-network</content>
-<parameter name="filePath">/home/roberto/galgo-config/docker-compose.yml
+    name: galgo-network
