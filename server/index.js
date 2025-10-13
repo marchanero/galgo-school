@@ -3,7 +3,7 @@ const appConfig = require('./src/config/app.config');
 
 const PORT = appConfig.port;
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════╗
 ║         Galgo School API Server                       ║
