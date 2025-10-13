@@ -4,8 +4,8 @@ import Navbar from './components/Navbar'
 import SensorManagement from './components/SensorManagement'
 import { useFormValidation, validationRules } from './hooks/useFormValidation'
 
-// API URL - hardcoded for now to fix the issue
-const API_URL = 'http://localhost:3001'
+// API URL - use environment variable for Docker deployment
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 
 function App() {
   const [sensors, setSensors] = useState([])
