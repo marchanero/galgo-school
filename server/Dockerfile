@@ -23,5 +23,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3001/api/sensors', (res) => process.exit(res.statusCode === 200 ? 0 : 1))"
 
 # Start the application
-CMD ["npm", "start"]</content>
-<parameter name="filePath">/home/roberto/galgo-config/server/Dockerfile
+CMD ["npm", "start"]

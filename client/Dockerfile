@@ -26,5 +26,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:5173/ || exit 1
 
 # Start the application
-CMD ["serve", "-s", "dist", "-l", "5173"]</content>
-<parameter name="filePath">/home/roberto/galgo-config/client/Dockerfile
+CMD ["serve", "-s", "dist", "-l", "5173"]
