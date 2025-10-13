@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # Galgo-School Backend
+  galgo-server:
+    image: ghcr.io/marchanero/galgo-school/galgo-server:latest
+    container_name: galgo-server
+    ports:
+      - "3001:3001"
+    environment:
+      - MQTT_BROKER=mqtt://host.docker.internal:1883
+      - NODE_ENV=production
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+    restart: unless-stopped
+
+  # Galgo-School Frontend
+  galgo-client:
+    image: ghcr.io/marchanero/galgo-school/galgo-client:latest
+    container_name: galgo-client
+    ports:
+      - "5173:5173"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - galgo-server
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+    restart: unless-stopped
+
+networks:
+  default:
+    name: galgo-network</content>
+<parameter name="filePath">/home/roberto/galgo-config/docker-compose.yml
