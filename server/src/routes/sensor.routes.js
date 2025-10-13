@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const sensorController = require('../controllers/sensor.controller');
+const sensorsController = require('../controllers/sensors.controller');
 
 /**
  * @swagger
@@ -16,18 +16,26 @@ const sensorController = require('../controllers/sensor.controller');
  *             schema:
  *               type: object
  *               properties:
+ *                 success:
+ *                   type: boolean
  *                 sensors:
  *                   type: array
  *                   items:
  *                     $ref: '#/components/schemas/Sensor'
- *       500:
- *         description: Error del servidor
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
  */
-router.get('/', sensorController.getAllSensors);
+router.get('/', sensorsController.getAllSensors);
+
+/**
+ * @swagger
+ * /api/sensors/types:
+ *   get:
+ *     summary: Obtener tipos de sensores disponibles
+ *     tags: [Sensors]
+ *     responses:
+ *       200:
+ *         description: Lista de tipos de sensores
+ */
+router.get('/types', sensorsController.getSensorTypes);
 
 /**
  * @swagger
@@ -45,16 +53,38 @@ router.get('/', sensorController.getAllSensors);
  *     responses:
  *       200:
  *         description: Sensor encontrado
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Sensor'
  *       404:
  *         description: Sensor no encontrado
- *       500:
- *         description: Error del servidor
  */
-router.get('/:id', sensorController.getSensorById);
+router.get('/:id', sensorsController.getSensorById);
+
+/**
+ * @swagger
+ * /api/sensors/{id}/data:
+ *   get:
+ *     summary: Obtener datos de un sensor
+ *     tags: [Sensors]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: Datos del sensor
+ */
+router.get('/:id/data', sensorsController.getSensorData);
 
 /**
  * @swagger
@@ -69,27 +99,71 @@ router.get('/:id', sensorController.getSensorById);
  *           schema:
  *             type: object
  *             required:
- *               - type
  *               - name
+ *               - type
+ *               - topic
  *             properties:
- *               type:
- *                 type: string
- *                 example: environmental
  *               name:
  *                 type: string
  *                 example: Sensor Temperatura
- *               data:
- *                 type: object
- *                 example: { "location": "Lab 1" }
+ *               type:
+ *                 type: string
+ *                 example: temperature
+ *               topic:
+ *                 type: string
+ *                 example: sensors/temperature/room1
+ *               description:
+ *                 type: string
+ *               unit:
+ *                 type: string
+ *               min_value:
+ *                 type: number
+ *               max_value:
+ *                 type: number
+ *               active:
+ *                 type: boolean
  *     responses:
  *       201:
  *         description: Sensor creado exitosamente
- *       400:
- *         description: Datos inválidos
- *       500:
- *         description: Error del servidor
  */
-router.post('/', sensorController.createSensor);
+router.post('/', sensorsController.createSensor);
+
+/**
+ * @swagger
+ * /api/sensors/{id}/data:
+ *   post:
+ *     summary: Agregar datos a un sensor
+ *     tags: [Sensors]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - value
+ *               - topic
+ *             properties:
+ *               value:
+ *                 type: string
+ *               topic:
+ *                 type: string
+ *               timestamp:
+ *                 type: string
+ *                 format: date-time
+ *               raw_message:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Datos agregados exitosamente
+ */
+router.post('/:id/data', sensorsController.addSensorData);
 
 /**
  * @swagger
@@ -110,21 +184,27 @@ router.post('/', sensorController.createSensor);
  *           schema:
  *             type: object
  *             properties:
- *               type:
- *                 type: string
  *               name:
  *                 type: string
- *               data:
- *                 type: object
+ *               type:
+ *                 type: string
+ *               topic:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               unit:
+ *                 type: string
+ *               min_value:
+ *                 type: number
+ *               max_value:
+ *                 type: number
+ *               active:
+ *                 type: boolean
  *     responses:
  *       200:
  *         description: Sensor actualizado
- *       404:
- *         description: Sensor no encontrado
- *       500:
- *         description: Error del servidor
  */
-router.put('/:id', sensorController.updateSensor);
+router.put('/:id', sensorsController.updateSensor);
 
 /**
  * @swagger
@@ -141,11 +221,7 @@ router.put('/:id', sensorController.updateSensor);
  *     responses:
  *       200:
  *         description: Sensor eliminado
- *       404:
- *         description: Sensor no encontrado
- *       500:
- *         description: Error del servidor
  */
-router.delete('/:id', sensorController.deleteSensor);
+router.delete('/:id', sensorsController.deleteSensor);
 
 module.exports = router;

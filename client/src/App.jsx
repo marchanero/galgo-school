@@ -1,15 +1,11 @@
 import { useState, useEffect } from 'react'
 import toast, { Toaster } from 'react-hot-toast'
 import Navbar from './components/Navbar'
-import SensorCard from './components/SensorCard'
-import MqttTopicCard from './components/MqttTopicCard'
-import MqttMessageCard from './components/MqttMessageCard'
-import MqttStatusCard from './components/MqttStatusCard'
-import RecordingControl from './components/RecordingControl'
+import SensorManagement from './components/SensorManagement'
 import { useFormValidation, validationRules } from './hooks/useFormValidation'
 
-// API URL from environment variable or default
-const API_URL = import.meta.env.VITE_API_URL || '${API_URL}'
+// API URL - hardcoded for now to fix the issue
+const API_URL = 'http://localhost:3001'
 
 function App() {
   const [sensors, setSensors] = useState([])
@@ -23,6 +19,15 @@ function App() {
   const [selectedCamera, setSelectedCamera] = useState(null)
   const [theme, setTheme] = useState('light')
   const [recordingAutoStart, setRecordingAutoStart] = useState(false)
+
+  // MQTT Topics and Sensors Management
+  const [mqttTopics, setMqttTopics] = useState([])
+  const [sensorTypes, setSensorTypes] = useState([])
+  const [selectedSensor, setSelectedSensor] = useState(null)
+  const [selectedTopic, setSelectedTopic] = useState(null)
+  const [showNewSensorModal, setShowNewSensorModal] = useState(false)
+  const [showNewTopicModal, setShowNewTopicModal] = useState(false)
+  const [sensorData, setSensorData] = useState({})
 
   // Camera IPs state
   const [cameraIPs, setCameraIPs] = useState([])
@@ -43,11 +48,11 @@ function App() {
       quality: 'Alta (1080p)'
     },
     mqtt: {
-      defaultBroker: 'EMQX Local (localhost:1883)',
-      host: 'localhost',
+      defaultBroker: 'EMQX Remoto (100.107.238.60:1883)',
+      host: '100.107.238.60',
       port: 1883,
-      username: '',
-      password: '',
+      username: 'admin',
+      password: 'galgo2526',
       ssl: false
     },
     cameras: {
@@ -119,6 +124,11 @@ function App() {
         }
 
         console.log('Configurations loaded from API')
+        
+        // Apply MQTT configuration after loading
+        setTimeout(() => {
+          applyMqttConfiguration()
+        }, 1000)
       }
     } catch (error) {
       console.error('Error loading configurations:', error)
@@ -129,7 +139,7 @@ function App() {
   // Save configurations to API
   const saveConfigurations = async (category, key, value) => {
     try {
-      const response = await fetch('${API_URL}/api/configurations', {
+      const response = await fetch(`${API_URL}/api/configurations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category, key, value })
@@ -151,7 +161,7 @@ function App() {
   // Save all configurations to API
   const saveAllConfigurations = async () => {
     try {
-      const response = await fetch('${API_URL}/api/configurations/bulk', {
+      const response = await fetch(`${API_URL}/api/configurations/bulk`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ configurations })
@@ -276,9 +286,112 @@ function App() {
     await updateConfiguration('general', 'recordingAutoStart', value)
   }
 
+  // Apply MQTT configuration and connect
+  const applyMqttConfiguration = async () => {
+    const mqttConfig = configurations.mqtt
+    if (mqttConfig.host && mqttConfig.port) {
+      const brokerUrl = `${mqttConfig.ssl ? 'mqtts' : 'mqtt'}://${mqttConfig.host}:${mqttConfig.port}`
+      setMqttBroker(brokerUrl)
+      
+      // Auto-connect if configuration is complete
+      if (mqttConfig.host !== 'localhost' || mqttConfig.username) {
+        try {
+          await connectMqttWithConfig(brokerUrl, {
+            username: mqttConfig.username,
+            password: mqttConfig.password
+          })
+        } catch (error) {
+          console.log('Auto-connect failed, manual connection required:', error.message)
+        }
+      }
+    }
+  }
+
+  // Handle MQTT preset selection
+  const handleMqttPresetChange = async (presetName) => {
+    await updateConfiguration('mqtt', 'defaultBroker', presetName)
+    
+    // Apply preset configurations
+    const presets = {
+      'EMQX Local (localhost:1883)': {
+        host: 'localhost',
+        port: 1883,
+        ssl: false,
+        username: '',
+        password: ''
+      },
+      'EMQX Remoto (100.107.238.60:1883)': {
+        host: '100.107.238.60',
+        port: 1883,
+        ssl: false,
+        username: 'admin',
+        password: 'galgo2526'
+      },
+      'HiveMQ Cloud': {
+        host: '',
+        port: 8883,
+        ssl: true,
+        username: '',
+        password: ''
+      },
+      'Mosquitto Local': {
+        host: 'localhost',
+        port: 1883,
+        ssl: false,
+        username: '',
+        password: ''
+      },
+      'Custom': {
+        host: configurations.mqtt.host,
+        port: configurations.mqtt.port,
+        ssl: configurations.mqtt.ssl,
+        username: configurations.mqtt.username,
+        password: configurations.mqtt.password
+      }
+    }
+    
+    const preset = presets[presetName] || presets['Custom']
+    
+    if (presetName !== 'Custom') {
+      await updateConfiguration('mqtt', 'host', preset.host)
+      await updateConfiguration('mqtt', 'port', preset.port)
+      await updateConfiguration('mqtt', 'ssl', preset.ssl)
+      await updateConfiguration('mqtt', 'username', preset.username)
+      await updateConfiguration('mqtt', 'password', preset.password)
+    }
+  }
+
+  // Connect MQTT with specific configuration
+  const connectMqttWithConfig = async (brokerUrl, options = {}) => {
+    setMqttLoading(true)
+    try {
+      const payload = { broker: brokerUrl }
+      if (options.username) payload.username = options.username
+      if (options.password) payload.password = options.password
+      
+      const response = await fetch(`${API_URL}/api/mqtt/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+
+      if (response.ok) {
+        await fetchMqttStatus()
+        return true
+      } else {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Connection failed')
+      }
+    } catch (error) {
+      console.error('MQTT connect error:', error)
+      throw error
+    } finally {
+      setMqttLoading(false)
+    }
+  }
+
   // MQTT States
   const [mqttStatus, setMqttStatus] = useState({ connected: false, broker: '', clientId: '' })
-  const [mqttTopics, setMqttTopics] = useState([])
   const [mqttMessages, setMqttMessages] = useState([])
   const [newTopic, setNewTopic] = useState({ topic: '', description: '', qos: 0, retained: false })
   const [mqttLoading, setMqttLoading] = useState(false)
@@ -361,6 +474,8 @@ function App() {
   useEffect(() => {
     if (currentSection === 'Sensores') {
       fetchSensors()
+      fetchSensorTypes()
+      fetchTopics()
     }
   }, [currentSection])
 
@@ -395,27 +510,182 @@ function App() {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch('${API_URL}/api/sensors')
+      const response = await fetch(`${API_URL}/api/sensors`)
       if (!response.ok) {
         throw new Error('Failed to fetch sensors')
       }
       const data = await response.json()
-      setSensors(data.sensors)
-    } catch {
-      // Fallback to mock data for development
-      console.warn('Using mock data due to server connection error')
-      setSensors([
-        { id: 1, type: 'environmental', name: 'Temperature Sensor A1', data: { location: 'Lab 1', parameters: 'temperature' } },
-        { id: 2, type: 'rtsp', name: 'Camera Lab Entrance', data: { host: '192.168.1.100', port: 554, path: '/stream', url: 'rtsp://192.168.1.100:554/stream' } },
-        { id: 3, type: 'emotibit', name: 'EmotiBit Participant 001', data: { deviceId: 'EB001', samplingRate: '250Hz' } }
-      ])
-      toast.error('Servidor no disponible. Usando datos de ejemplo para demostración.', {
-        duration: 6000,
-        icon: '⚠️'
-      })
-      setError('Server not available. Using sample data for demonstration.')
+      setSensors(data.sensors || [])
+    } catch (error) {
+      console.error('Error fetching sensors:', error)
+      setError('Failed to load sensors')
+      toast.error('Error al cargar sensores', { duration: 3000 })
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Fetch sensor types
+  const fetchSensorTypes = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/sensors/types`)
+      if (response.ok) {
+        const data = await response.json()
+        setSensorTypes(data.types || [])
+      }
+    } catch (error) {
+      console.error('Error fetching sensor types:', error)
+    }
+  }
+
+  // Fetch MQTT topics
+  const fetchTopics = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/topics`)
+      if (response.ok) {
+        const data = await response.json()
+        setMqttTopics(data.topics || [])
+      }
+    } catch (error) {
+      console.error('Error fetching topics:', error)
+    }
+  }
+
+  // Create new sensor
+  const createSensor = async (sensorData) => {
+    try {
+      const response = await fetch(`${API_URL}/api/sensors`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sensorData)
+      })
+
+      if (response.ok) {
+        await fetchSensors()
+        toast.success('Sensor creado exitosamente')
+        return true
+      } else {
+        const errorData = await response.json()
+        throw new Error(errorData.message || 'Failed to create sensor')
+      }
+    } catch (error) {
+      console.error('Error creating sensor:', error)
+      toast.error(`Error al crear sensor: ${error.message}`)
+      return false
+    }
+  }
+
+  // Update sensor
+  const updateSensor = async (id, sensorData) => {
+    try {
+      const response = await fetch(`${API_URL}/api/sensors/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sensorData)
+      })
+
+      if (response.ok) {
+        await fetchSensors()
+        toast.success('Sensor actualizado exitosamente')
+        return true
+      } else {
+        const errorData = await response.json()
+        throw new Error(errorData.message || 'Failed to update sensor')
+      }
+    } catch (error) {
+      console.error('Error updating sensor:', error)
+      toast.error(`Error al actualizar sensor: ${error.message}`)
+      return false
+    }
+  }
+
+  // Delete sensor
+  const deleteSensor = async (id) => {
+    try {
+      const response = await fetch(`${API_URL}/api/sensors/${id}`, {
+        method: 'DELETE'
+      })
+
+      if (response.ok) {
+        await fetchSensors()
+        toast.success('Sensor eliminado exitosamente')
+        return true
+      } else {
+        const errorData = await response.json()
+        throw new Error(errorData.message || 'Failed to delete sensor')
+      }
+    } catch (error) {
+      console.error('Error deleting sensor:', error)
+      toast.error(`Error al eliminar sensor: ${error.message}`)
+      return false
+    }
+  }
+
+  // Create new topic
+  const createTopic = async (topicData) => {
+    try {
+      const response = await fetch(`${API_URL}/api/topics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(topicData)
+      })
+
+      if (response.ok) {
+        await fetchTopics()
+        toast.success('Topic creado exitosamente')
+        return true
+      } else {
+        const errorData = await response.json()
+        throw new Error(errorData.message || 'Failed to create topic')
+      }
+    } catch (error) {
+      console.error('Error creating topic:', error)
+      toast.error(`Error al crear topic: ${error.message}`)
+      return false
+    }
+  }
+
+  // Subscribe to topic
+  const subscribeToTopic = async (topicId) => {
+    try {
+      const response = await fetch(`${API_URL}/api/topics/${topicId}/subscribe`, {
+        method: 'POST'
+      })
+
+      if (response.ok) {
+        await fetchTopics()
+        toast.success('Suscrito al topic exitosamente')
+        return true
+      } else {
+        const errorData = await response.json()
+        throw new Error(errorData.message || 'Failed to subscribe to topic')
+      }
+    } catch (error) {
+      console.error('Error subscribing to topic:', error)
+      toast.error(`Error al suscribirse: ${error.message}`)
+      return false
+    }
+  }
+
+  // Unsubscribe from topic
+  const unsubscribeFromTopic = async (topicId) => {
+    try {
+      const response = await fetch(`${API_URL}/api/topics/${topicId}/unsubscribe`, {
+        method: 'POST'
+      })
+
+      if (response.ok) {
+        await fetchTopics()
+        toast.success('Desuscrito del topic exitosamente')
+        return true
+      } else {
+        const errorData = await response.json()
+        throw new Error(errorData.message || 'Failed to unsubscribe from topic')
+      }
+    } catch (error) {
+      console.error('Error unsubscribing from topic:', error)
+      toast.error(`Error al desuscribirse: ${error.message}`)
+      return false
     }
   }
 
@@ -432,10 +702,22 @@ function App() {
     setLoading(true)
     setError(null)
 
-    // Prepare sensor data
+    // Prepare sensor data in the format expected by the backend
     let sensorData = { ...sensorForm.values }
 
-    // Build RTSP URL from components if it's an RTSP camera
+    // Map the data based on sensor type
+    let backendData = {
+      name: sensorData.name,
+      type: sensorData.type,
+      topic: '', // Will be set based on type
+      description: '',
+      unit: '',
+      min_value: null,
+      max_value: null,
+      active: true
+    }
+
+    // Set type-specific data
     if (sensorData.type === 'rtsp') {
       const { host, port, path, username, password } = sensorData.data
       let url = `rtsp://${host}:${port}${path}`
@@ -445,21 +727,51 @@ function App() {
         url = `rtsp://${username}:${password}@${host}:${port}${path}`
       }
       
-      sensorData.data = {
-        ...sensorData.data,
-        url: url // Add the constructed URL
+      backendData.topic = `rtsp/${sensorData.name.replace(/\s+/g, '_').toLowerCase()}`
+      backendData.description = `Cámara RTSP: ${url}`
+      backendData.unit = 'stream'
+      backendData.data = {
+        host,
+        port,
+        path,
+        username,
+        password,
+        url
+      }
+    } else if (sensorData.type === 'emotibit') {
+      backendData.topic = `emotibit/${sensorData.name.replace(/\s+/g, '_').toLowerCase()}`
+      backendData.description = `EmotiBit Device: ${sensorData.data.deviceId}`
+      backendData.unit = 'data'
+      backendData.data = {
+        deviceId: sensorData.data.deviceId,
+        samplingRate: sensorData.data.samplingRate
+      }
+    } else if (sensorData.type === 'environmental') {
+      backendData.topic = `environmental/${sensorData.name.replace(/\s+/g, '_').toLowerCase()}`
+      backendData.description = `Sensor Ambiental: ${sensorData.data.location}`
+      backendData.unit = sensorData.data.parameters || 'value'
+      backendData.data = {
+        location: sensorData.data.location,
+        parameters: sensorData.data.parameters
       }
     }
 
     try {
-      const response = await fetch('${API_URL}/api/sensors', {
+      const response = await fetch(`${API_URL}/api/sensors`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sensorData)
+        body: JSON.stringify(backendData)
       })
+
       if (!response.ok) {
-        throw new Error('Failed to add sensor')
+        const errorData = await response.json()
+        throw new Error(errorData.message || 'Failed to add sensor')
       }
+
+      const result = await response.json()
+      
+      // Store additional sensor data locally if needed
+      // For now, we'll just use the backend response
       fetchSensors()
       sensorForm.resetForm()
       toast.success(`Sensor "${sensorData.name}" agregado exitosamente`, {
@@ -486,7 +798,7 @@ function App() {
       })
 
       // Call API to start recording on server
-      const response = await fetch('${API_URL}/api/recording/start', {
+      const response = await fetch(`${API_URL}/api/recording/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -521,7 +833,7 @@ function App() {
       })
 
       // Call API to stop recording on server
-      const response = await fetch('${API_URL}/api/recording/stop', {
+      const response = await fetch(`${API_URL}/api/recording/stop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -561,7 +873,7 @@ function App() {
   // MQTT Functions
   const fetchMqttStatus = async () => {
     try {
-      const response = await fetch('${API_URL}/api/mqtt/status')
+      const response = await fetch(`${API_URL}/api/mqtt/status`)
       if (response.ok) {
         const data = await response.json()
         setMqttStatus(data)
@@ -573,7 +885,7 @@ function App() {
 
   const fetchMqttTopics = async () => {
     try {
-      const response = await fetch('${API_URL}/api/mqtt/topics')
+      const response = await fetch(`${API_URL}/api/mqtt/topics`)
       if (response.ok) {
         const data = await response.json()
         setMqttTopics(data.topics)
@@ -585,7 +897,7 @@ function App() {
 
   const fetchMqttMessages = async () => {
     try {
-      const response = await fetch('${API_URL}/api/mqtt/messages?limit=20')
+      const response = await fetch(`${API_URL}/api/mqtt/messages?limit=20`)
       if (response.ok) {
         const data = await response.json()
         setMqttMessages(data.messages)
@@ -609,7 +921,7 @@ function App() {
     })
 
     try {
-      const response = await fetch('${API_URL}/api/mqtt/connect', {
+      const response = await fetch(`${API_URL}/api/mqtt/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ broker: mqttBroker })
@@ -650,7 +962,7 @@ function App() {
     })
 
     try {
-      const response = await fetch('${API_URL}/api/mqtt/disconnect', {
+      const response = await fetch(`${API_URL}/api/mqtt/disconnect`, {
         method: 'POST'
       })
 
@@ -698,7 +1010,7 @@ function App() {
     })
 
     try {
-      const response = await fetch('${API_URL}/api/mqtt/topics', {
+      const response = await fetch(`${API_URL}/api/mqtt/topics`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(topicForm.values)
@@ -826,7 +1138,7 @@ function App() {
     })
 
     try {
-      const response = await fetch('${API_URL}/api/mqtt/publish', {
+      const response = await fetch(`${API_URL}/api/mqtt/publish`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(messageForm.values)
@@ -1333,6 +1645,17 @@ function App() {
             </div>
           </div>
         )
+      case 'Sensores':
+        return (
+          <div className="p-8">
+            <SensorManagement
+              sensors={sensors}
+              mqttTopics={mqttTopics}
+              onSensorUpdate={fetchSensors}
+              onTopicUpdate={fetchTopics}
+            />
+          </div>
+        )
       case 'Configuración':
         return (
           <div className="p-8">
@@ -1445,112 +1768,133 @@ function App() {
               )}
 
               {configTab === 'sensors' && (
-                <div className="space-y-6">
-                  {/* MQTT Connection Status */}
-                  <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
-                    <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
-                      <svg className="w-5 h-5 mr-2 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                      Conexión MQTT
-                    </h3>
-                    <div className="flex items-center justify-between mb-6">
-                      <div>
-                        <div className="flex items-center space-x-3">
-                          <div className={`w-3 h-3 rounded-full ${mqttStatus.connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-                          <span className={`font-medium ${mqttStatus.connected ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                            {mqttStatus.connected ? 'Conectado' : 'Desconectado'}
-                          </span>
-                          {mqttStatus.broker && (
-                            <span className="text-sm text-gray-500 dark:text-gray-400">
-                              • {mqttStatus.broker}
-                            </span>
-                          )}
+                <div className="p-8">
+                  <div className="mb-8">
+                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Gestión de Sensores y Topics MQTT</h2>
+                    <p className="text-gray-600 dark:text-gray-300">Administra sensores conectados y topics de mensajería</p>
+                  </div>
+
+                  {/* Estado de conexión MQTT */}
+                  <div className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 p-6 rounded-xl shadow-lg border border-green-200 dark:border-green-700 mb-8">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-4">
+                        <div className={`w-4 h-4 rounded-full ${mqttStatus.connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-green-600 dark:text-green-400">Estado MQTT</h3>
+                          <p className="text-sm text-green-700 dark:text-green-300">
+                            {mqttStatus.connected ? `Conectado a ${mqttStatus.broker}` : 'Desconectado'}
+                          </p>
                         </div>
                       </div>
-                      
-                      <div className="flex items-center space-x-4">
-                        <div className="flex items-center space-x-2">
-                          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Broker:</label>
-                          <input
-                            type="text"
-                            value={mqttBroker}
-                            onChange={(e) => setMqttBroker(e.target.value)}
-                            placeholder="mqtt://localhost:1883"
-                            className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                            disabled={mqttLoading}
-                          />
-                        </div>
-                        
-                        <button
-                          onClick={mqttStatus.connected ? disconnectMqtt : connectMqtt}
-                          disabled={mqttLoading}
-                          className={`flex items-center px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
-                            mqttStatus.connected
-                              ? 'bg-red-600 hover:bg-red-700 text-white'
-                              : 'bg-green-600 hover:bg-green-700 text-white'
-                          } disabled:opacity-50`}
-                        >
-                          {mqttLoading ? (
-                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                          ) : (
-                            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              {mqttStatus.connected ? (
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                              ) : (
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                              )}
-                            </svg>
-                          )}
-                          {mqttStatus.connected ? 'Desconectar' : 'Conectar'}
-                        </button>
+                      <div className="text-right">
+                        <div className="text-2xl font-bold text-green-600 dark:text-green-400">{mqttTopics.filter(t => t.active).length}</div>
+                        <div className="text-sm text-green-700 dark:text-green-300">Topics activos</div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Sensor Management */}
-                  <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
-                    <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
-                      <svg className="w-5 h-5 mr-2 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                      </svg>
-                      Gestión de Sensores
-                    </h3>
-                    {error && (
-                      <div className="bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-600 text-red-700 dark:text-red-200 px-4 py-3 rounded mb-4">
-                        {error}
-                      </div>
-                    )}
-                    
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* Sensor List */}
-                      <div>
-                        <h4 className="font-medium text-gray-900 dark:text-white mb-3">Sensores Registrados</h4>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* Gestión de Sensores */}
+                    <div className="space-y-6">
+                      <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+                        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                          <svg className="w-5 h-5 mr-2 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                          </svg>
+                          Sensores Registrados ({sensors.length})
+                        </h3>
+
                         {loading ? (
-                          <p className="text-gray-900 dark:text-white">Cargando sensores...</p>
+                          <div className="flex items-center justify-center py-8">
+                            <svg className="animate-spin h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span className="ml-2 text-gray-600 dark:text-gray-400">Cargando sensores...</span>
+                          </div>
+                        ) : sensors.length === 0 ? (
+                          <div className="text-center py-8">
+                            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                            </svg>
+                            <h3 className="mt-2 text-sm font-medium text-gray-900 dark:text-white">No hay sensores registrados</h3>
+                            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Comienza agregando tu primer sensor</p>
+                          </div>
                         ) : (
-                          <ul className="space-y-3 max-h-60 overflow-y-auto">
+                          <div className="space-y-3 max-h-96 overflow-y-auto">
                             {sensors.map(sensor => (
-                              <li key={sensor.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                                <div>
-                                  <span className="font-medium text-gray-900 dark:text-white">{sensor.name}</span>
-                                  <span className="ml-2 text-sm text-primary-600 dark:text-primary-400">({sensor.type})</span>
+                              <div key={sensor.id} className="flex items-center justify-between p-4 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 hover:shadow-md transition-shadow">
+                                <div className="flex-1">
+                                  <div className="flex items-center space-x-3">
+                                    <div className={`w-3 h-3 rounded-full ${
+                                      sensor.type === 'rtsp' ? 'bg-green-500' :
+                                      sensor.type === 'environmental' ? 'bg-blue-500' :
+                                      sensor.type === 'emotibit' ? 'bg-purple-500' : 'bg-gray-500'
+                                    }`}></div>
+                                    <div>
+                                      <h4 className="font-medium text-gray-900 dark:text-white">{sensor.name}</h4>
+                                      <p className="text-sm text-gray-500 dark:text-gray-400 capitalize">{sensor.type}</p>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 text-xs text-gray-400 dark:text-gray-500">
+                                    {sensor.type === 'rtsp' && sensor.data?.url && (
+                                      <span>RTSP: {sensor.data.url}</span>
+                                    )}
+                                    {sensor.type === 'environmental' && sensor.data?.location && (
+                                      <span>Ubicación: {sensor.data.location}</span>
+                                    )}
+                                    {sensor.type === 'emotibit' && sensor.data?.deviceId && (
+                                      <span>Device ID: {sensor.data.deviceId}</span>
+                                    )}
+                                  </div>
                                 </div>
-                                <span className="text-sm text-gray-500 dark:text-gray-400">{JSON.stringify(sensor.data)}</span>
-                              </li>
+                                <div className="flex items-center space-x-2">
+                                  <button
+                                    onClick={() => {
+                                      const newName = prompt('Nuevo nombre:', sensor.name)
+                                      if (newName && newName.trim() && newName !== sensor.name) {
+                                        updateSensor(sensor.id, { ...sensor, name: newName.trim() })
+                                      }
+                                    }}
+                                    className="p-2 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900 rounded-lg transition-colors"
+                                    title="Editar nombre"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      if (confirm(`¿Estás seguro de que quieres eliminar el sensor "${sensor.name}"?`)) {
+                                        deleteSensor(sensor.id)
+                                      }
+                                    }}
+                                    className="p-2 text-red-600 hover:bg-red-100 dark:hover:bg-red-900 rounded-lg transition-colors"
+                                    title="Eliminar sensor"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
                             ))}
-                          </ul>
+                          </div>
                         )}
                       </div>
-                      
-                      {/* Add New Sensor */}
-                      <div>
-                        <h4 className="font-medium text-gray-900 dark:text-white mb-3">Agregar Nuevo Sensor</h4>
+
+                      {/* Agregar Nuevo Sensor */}
+                      <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+                        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                          <svg className="w-5 h-5 mr-2 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                          </svg>
+                          Agregar Nuevo Sensor
+                        </h3>
+
                         <div className="space-y-4">
                           <div>
+                            <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Tipo de Sensor</label>
                             <select
                               value={sensorForm.values.type}
                               onChange={(e) => sensorForm.handleChange('type', e.target.value)}
@@ -1571,9 +1915,10 @@ function App() {
                           </div>
 
                           <div>
+                            <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Nombre del Sensor</label>
                             <input
                               type="text"
-                              placeholder="Nombre del Sensor"
+                              placeholder="Ej: Sensor Temperatura Principal"
                               value={sensorForm.values.name}
                               onChange={(e) => sensorForm.handleChange('name', e.target.value)}
                               onBlur={() => sensorForm.handleBlur('name')}
@@ -1588,12 +1933,202 @@ function App() {
                           </div>
 
                           {renderDataFields(sensorForm.values.type, sensorForm)}
+
                           <button
                             onClick={addSensor}
                             disabled={loading || !sensorForm.isValid}
-                            className="w-full bg-gradient-primary hover:bg-gradient-secondary text-white font-bold py-3 px-4 rounded-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="w-full bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-bold py-3 px-4 rounded-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                           >
-                            {loading ? 'Agregando...' : 'Agregar Sensor'}
+                            {loading ? (
+                              <>
+                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Agregando...
+                              </>
+                            ) : (
+                              <>
+                                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                </svg>
+                                Agregar Sensor
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Gestión de Topics MQTT */}
+                    <div className="space-y-6">
+                      <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+                        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                          <svg className="w-5 h-5 mr-2 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 4V2a1 1 0 011-1h3a1 1 0 011 1v2h4a1 1 0 011 1v5a1 1 0 01-1 1H8a1 1 0 01-1-1V5a1 1 0 011-1h4zM7 10v6a1 1 0 001 1h8a1 1 0 001-1v-6M7 10H4a1 1 0 00-1 1v8a1 1 0 001 1h3m0-10h10m0 0V8a1 1 0 00-1-1H7a1 1 0 00-1 1v2z" />
+                          </svg>
+                          Topics MQTT ({mqttTopics.length})
+                        </h3>
+
+                        {mqttTopics.length === 0 ? (
+                          <div className="text-center py-8">
+                            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 4V2a1 1 0 011-1h3a1 1 0 011 1v2h4a1 1 0 011 1v5a1 1 0 01-1 1H8a1 1 0 01-1-1V5a1 1 0 011-1h4zM7 10v6a1 1 0 001 1h8a1 1 0 001-1v-6M7 10H4a1 1 0 00-1 1v8a1 1 0 001 1h3m0-10h10m0 0V8a1 1 0 00-1-1H7a1 1 0 00-1 1v2z" />
+                            </svg>
+                            <h3 className="mt-2 text-sm font-medium text-gray-900 dark:text-white">No hay topics configurados</h3>
+                            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Agrega topics para recibir mensajes MQTT</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-3 max-h-96 overflow-y-auto">
+                            {mqttTopics.map(topic => (
+                              <div key={topic.id} className="flex items-center justify-between p-4 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 hover:shadow-md transition-shadow">
+                                <div className="flex-1">
+                                  <div className="flex items-center space-x-3">
+                                    <div className={`w-3 h-3 rounded-full ${topic.active ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
+                                    <div>
+                                      <h4 className="font-medium text-gray-900 dark:text-white">{topic.topic}</h4>
+                                      {topic.description && (
+                                        <p className="text-sm text-gray-500 dark:text-gray-400">{topic.description}</p>
+                                      )}
+                                      <div className="text-xs text-gray-400 dark:text-gray-500">
+                                        QoS: {topic.qos} | Retained: {topic.retained ? 'Sí' : 'No'}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <button
+                                    onClick={() => {
+                                      if (topic.active) {
+                                        unsubscribeFromTopic(topic.id)
+                                      } else {
+                                        subscribeToTopic(topic.id)
+                                      }
+                                    }}
+                                    className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                                      topic.active
+                                        ? 'bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900 dark:text-red-200 dark:hover:bg-red-800'
+                                        : 'bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900 dark:text-green-200 dark:hover:bg-green-800'
+                                    }`}
+                                  >
+                                    {topic.active ? 'Desuscribir' : 'Suscribir'}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      if (confirm(`¿Estás seguro de que quieres eliminar el topic "${topic.topic}"?`)) {
+                                        // Implementar deleteTopic si es necesario
+                                        toast.error('Función de eliminación no implementada aún')
+                                      }
+                                    }}
+                                    className="p-2 text-red-600 hover:bg-red-100 dark:hover:bg-red-900 rounded-lg transition-colors"
+                                    title="Eliminar topic"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Agregar Nuevo Topic */}
+                      <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+                        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                          <svg className="w-5 h-5 mr-2 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                          </svg>
+                          Agregar Nuevo Topic
+                        </h3>
+
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Topic MQTT</label>
+                            <input
+                              type="text"
+                              placeholder="Ej: sensors/temperature/room1"
+                              value={topicForm.values.topic}
+                              onChange={(e) => topicForm.handleChange('topic', e.target.value)}
+                              onBlur={() => topicForm.handleBlur('topic')}
+                              className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${
+                                topicForm.errors.topic ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'
+                              }`}
+                              disabled={mqttLoading}
+                            />
+                            {topicForm.errors.topic && topicForm.touched.topic && (
+                              <p className="text-red-500 text-sm mt-1">{topicForm.errors.topic}</p>
+                            )}
+                          </div>
+
+                          <div>
+                            <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Descripción (opcional)</label>
+                            <input
+                              type="text"
+                              placeholder="Descripción del topic"
+                              value={topicForm.values.description}
+                              onChange={(e) => topicForm.handleChange('description', e.target.value)}
+                              onBlur={() => topicForm.handleBlur('description')}
+                              className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${
+                                topicForm.errors.description ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'
+                              }`}
+                              disabled={mqttLoading}
+                            />
+                            {topicForm.errors.description && topicForm.touched.description && (
+                              <p className="text-red-500 text-sm mt-1">{topicForm.errors.description}</p>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">QoS</label>
+                              <select
+                                value={topicForm.values.qos}
+                                onChange={(e) => topicForm.handleChange('qos', parseInt(e.target.value))}
+                                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                disabled={mqttLoading}
+                              >
+                                <option value={0}>0 - Al menos una vez</option>
+                                <option value={1}>1 - Al menos una vez</option>
+                                <option value={2}>2 - Exactamente una vez</option>
+                              </select>
+                            </div>
+                            <div className="flex items-center">
+                              <label className="flex items-center space-x-2 text-sm text-gray-700 dark:text-gray-300">
+                                <input
+                                  type="checkbox"
+                                  checked={topicForm.values.retained}
+                                  onChange={(e) => topicForm.handleChange('retained', e.target.checked)}
+                                  className="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
+                                  disabled={mqttLoading}
+                                />
+                                <span>Retained</span>
+                              </label>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={addMqttTopic}
+                            disabled={mqttLoading || !topicForm.isValid}
+                            className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-bold py-3 px-4 rounded-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                          >
+                            {mqttLoading ? (
+                              <>
+                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Agregando...
+                              </>
+                            ) : (
+                              <>
+                                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                </svg>
+                                Agregar Topic
+                              </>
+                            )}
                           </button>
                         </div>
                       </div>
@@ -1833,89 +2368,232 @@ function App() {
               )}
 
               {configTab === 'mqtt' && (
-                <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
-                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
-                    <svg className="w-5 h-5 mr-2 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                    Configuración MQTT
-                  </h3>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Broker Predeterminado</label>
-                      <select
-                        value={configurations.mqtt.defaultBroker}
-                        onChange={(e) => updateConfiguration('mqtt', 'defaultBroker', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                      >
-                        <option>EMQX Local (localhost:1883)</option>
-                        <option>HiveMQ Cloud</option>
-                        <option>Mosquitto Local</option>
-                        <option>Custom</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Host</label>
-                      <input
-                        type="text"
-                        value={configurations.mqtt.host}
-                        onChange={(e) => updateConfiguration('mqtt', 'host', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Puerto</label>
-                      <input
-                        type="number"
-                        value={configurations.mqtt.port}
-                        onChange={(e) => updateConfiguration('mqtt', 'port', parseInt(e.target.value))}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-6">
+                  {/* Estado de conexión MQTT */}
+                  <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+                    <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                      <svg className="w-5 h-5 mr-2 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      Estado de Conexión MQTT
+                    </h3>
+                    <div className="flex items-center justify-between mb-6">
                       <div>
-                        <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Usuario</label>
-                        <input
-                          type="text"
-                          placeholder="Opcional"
-                          value={configurations.mqtt.username}
-                          onChange={(e) => updateConfiguration('mqtt', 'username', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                        />
+                        <div className="flex items-center space-x-3">
+                          <div className={`w-4 h-4 rounded-full ${mqttStatus.connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                          <span className={`font-medium ${mqttStatus.connected ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                            {mqttStatus.connected ? 'Conectado' : 'Desconectado'}
+                          </span>
+                          {mqttStatus.broker && (
+                            <span className="text-sm text-gray-500 dark:text-gray-400">
+                              • {mqttStatus.broker}
+                            </span>
+                          )}
+                        </div>
+                        {mqttStatus.connected && (
+                          <div className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                            Client ID: {mqttStatus.clientId}
+                          </div>
+                        )}
                       </div>
-                      <div>
-                        <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Contraseña</label>
-                        <input
-                          type="password"
-                          placeholder="Opcional"
-                          value={configurations.mqtt.password}
-                          onChange={(e) => updateConfiguration('mqtt', 'password', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                        />
+                      
+                      <div className="flex items-center space-x-4">
+                        <button
+                          onClick={() => fetchMqttStatus()}
+                          className="p-2 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900 dark:hover:bg-blue-800 text-blue-600 dark:text-blue-400 rounded-lg transition-colors"
+                          title="Actualizar estado"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                        </button>
+                        
+                        <button
+                          onClick={mqttStatus.connected ? disconnectMqtt : () => applyMqttConfiguration()}
+                          disabled={mqttLoading}
+                          className={`flex items-center px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
+                            mqttStatus.connected
+                              ? 'bg-red-600 hover:bg-red-700 text-white'
+                              : 'bg-green-600 hover:bg-green-700 text-white'
+                          } disabled:opacity-50`}
+                        >
+                          {mqttLoading ? (
+                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                          ) : (
+                            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              {mqttStatus.connected ? (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                              ) : (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                              )}
+                            </svg>
+                          )}
+                          {mqttStatus.connected ? 'Desconectar' : 'Conectar'}
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-gray-700 dark:text-gray-300">Conexión SSL/TLS</span>
-                      <button
-                        onClick={() => updateConfiguration('mqtt', 'ssl', !configurations.mqtt.ssl)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                          configurations.mqtt.ssl ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'
-                        }`}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                            configurations.mqtt.ssl ? 'translate-x-6' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                    <button
-                      onClick={() => saveAllConfigurations()}
-                      className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
-                    >
-                      Guardar Configuración MQTT
-                    </button>
                   </div>
+
+                  {/* Configuración MQTT */}
+                  <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+                    <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                      <svg className="w-5 h-5 mr-2 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      Configuración del Broker MQTT
+                    </h3>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Broker Predeterminado</label>
+                        <select
+                          value={configurations.mqtt.defaultBroker || 'EMQX Local (localhost:1883)'}
+                          onChange={(e) => handleMqttPresetChange(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        >
+                          <option value="EMQX Local (localhost:1883)">EMQX Local (localhost:1883)</option>
+                          <option value="EMQX Remoto (100.107.238.60:1883)">EMQX Remoto (100.107.238.60:1883)</option>
+                          <option value="HiveMQ Cloud">HiveMQ Cloud</option>
+                          <option value="Mosquitto Local">Mosquitto Local</option>
+                          <option value="Custom">Custom</option>
+                        </select>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Host/IP</label>
+                          <input
+                            type="text"
+                            placeholder="localhost"
+                            value={configurations.mqtt.host}
+                            onChange={(e) => updateConfiguration('mqtt', 'host', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Puerto</label>
+                          <input
+                            type="number"
+                            placeholder="1883"
+                            value={configurations.mqtt.port}
+                            onChange={(e) => updateConfiguration('mqtt', 'port', parseInt(e.target.value) || 1883)}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          />
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Usuario</label>
+                          <input
+                            type="text"
+                            placeholder="Opcional"
+                            value={configurations.mqtt.username}
+                            onChange={(e) => updateConfiguration('mqtt', 'username', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Contraseña</label>
+                          <input
+                            type="password"
+                            placeholder="Opcional"
+                            value={configurations.mqtt.password}
+                            onChange={(e) => updateConfiguration('mqtt', 'password', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          />
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-700 dark:text-gray-300">Conexión SSL/TLS</span>
+                        <button
+                          onClick={() => updateConfiguration('mqtt', 'ssl', !configurations.mqtt.ssl)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                            configurations.mqtt.ssl ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                              configurations.mqtt.ssl ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                      
+                      <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h4 className="font-medium text-gray-900 dark:text-white">URL de Conexión Generada</h4>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">Esta URL se usará para conectar al broker</p>
+                          </div>
+                        </div>
+                        <div className="font-mono text-sm bg-gray-100 dark:bg-gray-900 p-3 rounded border">
+                          {`${configurations.mqtt.ssl ? 'mqtts' : 'mqtt'}://${configurations.mqtt.host || 'localhost'}:${configurations.mqtt.port || 1883}`}
+                        </div>
+                      </div>
+                      
+                      <div className="flex space-x-3">
+                        <button
+                          onClick={() => applyMqttConfiguration()}
+                          disabled={mqttLoading}
+                          className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          Probar Conexión
+                        </button>
+                        <button
+                          onClick={() => saveAllConfigurations()}
+                          className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+                        >
+                          Guardar Configuración
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Topics MQTT */}
+                  {mqttStatus.connected && (
+                    <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+                      <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                        <svg className="w-5 h-5 mr-2 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 4V2a1 1 0 011-1h3a1 1 0 011 1v2h4a1 1 0 011 1v5a1 1 0 01-1 1H8a1 1 0 01-1-1V5a1 1 0 011-1h4zM7 10v6a1 1 0 001 1h8a1 1 0 001-1v-6M7 10H4a1 1 0 00-1 1v8a1 1 0 001 1h3m0-10h10m0 0V8a1 1 0 00-1-1H7a1 1 0 00-1 1v2z" />
+                        </svg>
+                        Topics MQTT ({mqttTopics.filter(t => t.active).length} activos)
+                      </h3>
+                      
+                      <div className="max-h-60 overflow-y-auto space-y-2">
+                        {mqttTopics.length === 0 ? (
+                          <p className="text-gray-500 dark:text-gray-400 text-center py-4">No hay topics configurados</p>
+                        ) : (
+                          mqttTopics.map(topic => (
+                            <div key={topic.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900 dark:text-white">{topic.topic}</div>
+                                {topic.description && (
+                                  <div className="text-sm text-gray-500 dark:text-gray-400">{topic.description}</div>
+                                )}
+                                <div className="text-xs text-gray-400 dark:text-gray-500">
+                                  QoS: {topic.qos} | Retained: {topic.retained ? 'Sí' : 'No'}
+                                </div>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <span className={`px-2 py-1 text-xs rounded-full ${
+                                  topic.active 
+                                    ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' 
+                                    : 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                                }`}>
+                                  {topic.active ? 'Activo' : 'Inactivo'}
+                                </span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1989,7 +2667,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors duration-300">
-      <Navbar currentSection={currentSection} setCurrentSection={setCurrentSection} setConfigTab={setConfigTab} />
+      <Navbar currentSection={currentSection} setCurrentSection={setCurrentSection} setConfigTab={setConfigTab} mqttStatus={mqttStatus} />
       {renderSection()}
     </div>
   )

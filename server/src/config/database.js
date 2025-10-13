@@ -29,7 +29,12 @@ const createTables = () => {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     type TEXT NOT NULL,
     name TEXT NOT NULL,
-    data TEXT,
+    topic TEXT NOT NULL,
+    description TEXT,
+    unit TEXT,
+    min_value REAL,
+    max_value REAL,
+    active BOOLEAN DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
@@ -56,7 +61,7 @@ const createTables = () => {
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
-  // Configurations table
+  // Configurations table - with category support
   db.run(`CREATE TABLE IF NOT EXISTS configurations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     category TEXT NOT NULL,

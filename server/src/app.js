@@ -4,18 +4,30 @@ const swaggerUi = require('swagger-ui-express');
 const swaggerSpecs = require('./config/swagger');
 const appConfig = require('./config/app.config');
 const { initializeDatabase } = require('./config/database');
-const mqttService = require('./services/mqtt.service');
 const routes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
 const logger = require('./middlewares/logger');
+
+// Initialize MQTT service (optional auto-connect)
+const mqttService = require('./services/mqtt.service');
 
 const app = express();
 
 // Initialize database
 initializeDatabase();
 
-// Initialize MQTT
-mqttService.initialize();
+// Optional: Auto-connect to MQTT broker on startup
+if (appConfig.mqtt.broker && appConfig.mqtt.broker !== 'mqtt://100.107.238.60:1883') {
+  console.log('🔄 Attempting to auto-connect to MQTT broker...');
+  mqttService.connect(appConfig.mqtt.broker, {
+    username: appConfig.mqtt.username,
+    password: appConfig.mqtt.password,
+    clientId: appConfig.mqtt.clientId,
+  }).catch(error => {
+    console.log('⚠️ Auto-connection to MQTT broker failed:', error.message);
+    console.log('Manual connection will be available via API');
+  });
+}
 
 // Middlewares
 app.use(cors(appConfig.cors));

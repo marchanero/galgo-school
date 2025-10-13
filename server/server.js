@@ -5,6 +5,9 @@ const mqtt = require('mqtt');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpecs = require('./swagger');
 
+// Import modular routes
+const routes = require('./src/routes');
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -22,6 +25,9 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs, {
   customSiteTitle: 'Galgo School API Documentation',
 }));
 
+// Use modular routes
+app.use('/api', routes);
+
 // SQLite database
 const db = new sqlite3.Database('./sensors.db', (err) => {
   if (err) {
@@ -33,7 +39,15 @@ const db = new sqlite3.Database('./sensors.db', (err) => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       type TEXT NOT NULL,
       name TEXT NOT NULL,
-      data TEXT
+      topic TEXT,
+      description TEXT,
+      unit TEXT,
+      min_value REAL,
+      max_value REAL,
+      data TEXT,
+      active BOOLEAN DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
     // Create MQTT topics table
@@ -640,130 +654,6 @@ app.get('/api/mqtt/messages', (req, res) => {
       return;
     }
     res.json({ messages: rows });
-  });
-});
-
-// Configuration endpoints
-app.get('/api/configurations', (req, res) => {
-  db.all('SELECT * FROM configurations ORDER BY category, key', [], (err, rows) => {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
-    }
-
-    // Group configurations by category
-    const configurations = {};
-    rows.forEach(row => {
-      if (!configurations[row.category]) {
-        configurations[row.category] = {};
-      }
-      // Try to parse JSON values, fallback to string
-      try {
-        configurations[row.category][row.key] = JSON.parse(row.value);
-      } catch {
-        configurations[row.category][row.key] = row.value;
-      }
-    });
-
-    res.json({ configurations });
-  });
-});
-
-app.post('/api/configurations', (req, res) => {
-  const { category, key, value } = req.body;
-
-  if (!category || !key) {
-    return res.status(400).json({ error: 'Category and key are required' });
-  }
-
-  // Convert value to string (JSON if object/array)
-  const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
-
-  db.run('INSERT OR REPLACE INTO configurations (category, key, value, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)',
-    [category, key, valueStr], function(err) {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
-    }
-    res.json({ id: this.lastID, category, key, value });
-  });
-});
-
-app.put('/api/configurations/:category/:key', (req, res) => {
-  const { category, key } = req.params;
-  const { value } = req.body;
-
-  if (!category || !key) {
-    return res.status(400).json({ error: 'Category and key are required' });
-  }
-
-  // Convert value to string (JSON if object/array)
-  const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
-
-  db.run('UPDATE configurations SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE category = ? AND key = ?',
-    [valueStr, category, key], function(err) {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
-    }
-
-    if (this.changes === 0) {
-      return res.status(404).json({ error: 'Configuration not found' });
-    }
-
-    res.json({ success: true, category, key, value });
-  });
-});
-
-app.put('/api/configurations/bulk', (req, res) => {
-  const { configurations } = req.body;
-
-  if (!configurations || typeof configurations !== 'object') {
-    return res.status(400).json({ error: 'Configurations object is required' });
-  }
-
-  const statements = [];
-  const params = [];
-
-  // Build bulk update statements
-  Object.entries(configurations).forEach(([category, categoryConfigs]) => {
-    Object.entries(categoryConfigs).forEach(([key, value]) => {
-      const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
-      statements.push('INSERT OR REPLACE INTO configurations (category, key, value, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)');
-      params.push(category, key, valueStr);
-    });
-  });
-
-  if (statements.length === 0) {
-    return res.status(400).json({ error: 'No configurations to update' });
-  }
-
-  // Execute all statements in a transaction
-  db.serialize(() => {
-    db.run('BEGIN TRANSACTION');
-
-    let completed = 0;
-    let hasError = false;
-
-    statements.forEach((stmt, index) => {
-      db.run(stmt, params.slice(index * 3, (index + 1) * 3), (err) => {
-        if (err && !hasError) {
-          hasError = true;
-          db.run('ROLLBACK');
-          return res.status(500).json({ error: err.message });
-        }
-
-        completed++;
-        if (completed === statements.length && !hasError) {
-          db.run('COMMIT', (err) => {
-            if (err) {
-              return res.status(500).json({ error: err.message });
-            }
-            res.json({ success: true, updated: statements.length });
-          });
-        }
-      });
-    });
   });
 });
 

@@ -29,13 +29,13 @@ class SensorController {
 
   async createSensor(req, res) {
     try {
-      const { type, name, data } = req.body;
+      const { type, name, topic, description, unit, min_value, max_value, active } = req.body;
       
-      if (!type || !name) {
-        return res.status(400).json({ error: 'Type and name are required' });
+      if (!type || !name || !topic) {
+        return res.status(400).json({ error: 'Type, name, and topic are required' });
       }
       
-      const sensor = await sensorService.createSensor({ type, name, data });
+      const sensor = await sensorService.createSensor({ type, name, topic, description, unit, min_value, max_value, active });
       res.status(201).json(sensor);
     } catch (error) {
       console.error('Error creating sensor:', error);
@@ -46,9 +46,9 @@ class SensorController {
   async updateSensor(req, res) {
     try {
       const { id } = req.params;
-      const { type, name, data } = req.body;
+      const { type, name, topic, description, unit, min_value, max_value, active } = req.body;
       
-      const sensor = await sensorService.updateSensor(id, { type, name, data });
+      const sensor = await sensorService.updateSensor(id, { type, name, topic, description, unit, min_value, max_value, active });
       res.json(sensor);
     } catch (error) {
       console.error('Error updating sensor:', error);

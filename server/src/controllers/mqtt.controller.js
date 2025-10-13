@@ -1,237 +1,309 @@
 const mqttService = require('../services/mqtt.service');
-const { getDatabase } = require('../config/database');
 
-class MQTTController {
-  getStatus(req, res) {
+class MqttController {
+  /**
+   * Get MQTT connection status
+   * GET /api/mqtt/status
+   */
+  async getStatus(req, res) {
     try {
       const status = mqttService.getStatus();
       res.json(status);
     } catch (error) {
       console.error('Error getting MQTT status:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({
+        error: 'Failed to get MQTT status',
+        message: error.message
+      });
     }
   }
 
-  connect(req, res) {
+  /**
+   * Connect to MQTT broker
+   * POST /api/mqtt/connect
+   */
+  async connect(req, res) {
     try {
-      const { broker, clientId } = req.body;
-      
-      if (broker) {
-        process.env.MQTT_BROKER = broker;
+      const { broker, username, password, ssl } = req.body;
+
+      if (!broker) {
+        return res.status(400).json({
+          error: 'Broker URL is required',
+          message: 'Please provide a broker URL in the request body'
+        });
       }
-      
-      mqttService.initialize();
-      
+
+      // Validate broker URL format
+      if (!broker.startsWith('mqtt://') && !broker.startsWith('mqtts://') && !broker.startsWith('ws://') && !broker.startsWith('wss://')) {
+        return res.status(400).json({
+          error: 'Invalid broker URL format',
+          message: 'Broker URL must start with mqtt://, mqtts://, ws://, or wss://'
+        });
+      }
+
+      // Prepare connection options
+      const options = {};
+      if (username) options.username = username;
+      if (password) options.password = password;
+      if (ssl !== undefined) options.rejectUnauthorized = false; // For self-signed certificates
+
+      console.log(`Attempting to connect to MQTT broker: ${broker}`);
+      if (username) console.log(`Using authentication with username: ${username}`);
+
+      const result = await mqttService.connect(broker, options);
+
       res.json({
         success: true,
-        message: 'MQTT connection initiated',
-        broker: process.env.MQTT_BROKER,
+        message: 'Connected to MQTT broker successfully',
+        data: result
       });
+
     } catch (error) {
-      console.error('Error connecting to MQTT:', error);
-      res.status(500).json({ error: error.message });
+      console.error('Error connecting to MQTT broker:', error);
+      res.status(400).json({
+        success: false,
+        error: 'Failed to connect to MQTT broker',
+        message: error.message,
+        code: error.code || 'UNKNOWN_ERROR'
+      });
     }
   }
 
-  disconnect(req, res) {
+  /**
+   * Disconnect from MQTT broker
+   * POST /api/mqtt/disconnect
+   */
+  async disconnect(req, res) {
     try {
-      mqttService.disconnect();
+      const result = await mqttService.disconnect();
+
       res.json({
         success: true,
-        message: 'MQTT disconnected',
+        message: 'Disconnected from MQTT broker successfully',
+        data: result
       });
+
     } catch (error) {
-      console.error('Error disconnecting MQTT:', error);
-      res.status(500).json({ error: error.message });
+      console.error('Error disconnecting from MQTT broker:', error);
+      res.status(500).json({
+        error: 'Failed to disconnect from MQTT broker',
+        message: error.message
+      });
     }
   }
 
-  getAllTopics(req, res) {
-    const db = getDatabase();
-    
-    db.all('SELECT * FROM mqtt_topics ORDER BY created_at DESC', [], (err, rows) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({ topics: rows });
-    });
+  /**
+   * Get all MQTT topics
+   * GET /api/mqtt/topics
+   */
+  async getTopics(req, res) {
+    try {
+      const topics = mqttService.getTopics();
+      res.json({ topics });
+    } catch (error) {
+      console.error('Error getting MQTT topics:', error);
+      res.status(500).json({
+        error: 'Failed to get MQTT topics',
+        message: error.message
+      });
+    }
   }
 
-  async createTopic(req, res) {
+  /**
+   * Add a new MQTT topic
+   * POST /api/mqtt/topics
+   */
+  async addTopic(req, res) {
     try {
-      const { topic, description, qos, retained } = req.body;
-      
+      const { topic, description, qos = 0, retained = false } = req.body;
+
       if (!topic) {
-        return res.status(400).json({ error: 'Topic is required' });
+        return res.status(400).json({
+          error: 'Topic is required',
+          message: 'Please provide a topic in the request body'
+        });
       }
-      
-      const db = getDatabase();
-      
-      db.run(
-        'INSERT INTO mqtt_topics (topic, description, qos, retained) VALUES (?, ?, ?, ?)',
-        [topic, description || '', qos || 0, retained || false],
-        async function(err) {
-          if (err) {
-            if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-              return res.status(409).json({ error: 'Topic already exists' });
-            }
-            return res.status(500).json({ error: err.message });
-          }
-          
-          // Subscribe to the new topic
-          try {
-            await mqttService.subscribe(topic, qos || 0);
-            console.log(`Subscribed to new topic: ${topic}`);
-          } catch (error) {
-            console.error(`Error subscribing to ${topic}:`, error);
-          }
-          
-          res.status(201).json({
-            id: this.lastID,
-            topic,
-            description,
-            qos,
-            retained,
-          });
-        }
-      );
+
+      // Validate topic format (basic MQTT topic validation)
+      if (!topic || topic.trim() === '') {
+        return res.status(400).json({
+          error: 'Invalid topic',
+          message: 'Topic cannot be empty'
+        });
+      }
+
+      // Check for invalid characters in topic
+      if (topic.includes('#') && topic !== '#') {
+        return res.status(400).json({
+          error: 'Invalid topic',
+          message: 'Wildcard # can only be used alone'
+        });
+      }
+
+      if (topic.includes('+') && (topic.startsWith('+') || topic.endsWith('+') || topic.includes('/+/'))) {
+        // Allow + as single level wildcard, but validate it's not at start/end incorrectly
+      }
+
+      const result = await mqttService.addTopic(topic, {
+        qos: parseInt(qos) || 0,
+        retained: Boolean(retained),
+        active: true // New topics are active by default
+      });
+
+      res.status(201).json({
+        success: true,
+        message: 'MQTT topic added successfully',
+        data: result
+      });
+
     } catch (error) {
-      console.error('Error creating topic:', error);
-      res.status(500).json({ error: error.message });
+      console.error('Error adding MQTT topic:', error);
+      res.status(500).json({
+        error: 'Failed to add MQTT topic',
+        message: error.message
+      });
     }
   }
 
+  /**
+   * Update an MQTT topic
+   * PUT /api/mqtt/topics/:id
+   */
   async updateTopic(req, res) {
     try {
       const { id } = req.params;
-      const { topic, description, qos, retained, active } = req.body;
-      
-      const db = getDatabase();
-      
-      // Get old topic first
-      db.get('SELECT topic FROM mqtt_topics WHERE id = ?', [id], async (err, oldRow) => {
-        if (err) {
-          return res.status(500).json({ error: err.message });
-        }
-        
-        if (!oldRow) {
-          return res.status(404).json({ error: 'Topic not found' });
-        }
-        
-        // Update topic
-        db.run(
-          'UPDATE mqtt_topics SET topic = ?, description = ?, qos = ?, retained = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [topic, description, qos, retained, active, id],
-          async function(err) {
-            if (err) {
-              return res.status(500).json({ error: err.message });
-            }
-            
-            if (this.changes === 0) {
-              return res.status(404).json({ error: 'Topic not found' });
-            }
-            
-            // Resubscribe if topic changed
-            if (oldRow.topic !== topic) {
-              try {
-                await mqttService.unsubscribe(oldRow.topic);
-                await mqttService.subscribe(topic, qos || 0);
-                console.log(`Resubscribed from ${oldRow.topic} to ${topic}`);
-              } catch (error) {
-                console.error('Error resubscribing:', error);
-              }
-            }
-            
-            res.json({ success: true });
-          }
-        );
+      const { active, qos, retained } = req.body;
+
+      // Find topic by ID (convert ID back to topic)
+      const topics = mqttService.getTopics();
+      const topicData = topics.find(t => t.id === id);
+
+      if (!topicData) {
+        return res.status(404).json({
+          error: 'Topic not found',
+          message: `No topic found with ID: ${id}`
+        });
+      }
+
+      const updates = {};
+      if (active !== undefined) updates.active = Boolean(active);
+      if (qos !== undefined) updates.qos = parseInt(qos) || 0;
+      if (retained !== undefined) updates.retained = Boolean(retained);
+
+      const result = await mqttService.updateTopic(topicData.topic, updates);
+
+      res.json({
+        success: true,
+        message: 'MQTT topic updated successfully',
+        data: result
       });
+
     } catch (error) {
-      console.error('Error updating topic:', error);
-      res.status(500).json({ error: error.message });
+      console.error('Error updating MQTT topic:', error);
+      res.status(500).json({
+        error: 'Failed to update MQTT topic',
+        message: error.message
+      });
     }
   }
 
+  /**
+   * Delete an MQTT topic
+   * DELETE /api/mqtt/topics/:id
+   */
   async deleteTopic(req, res) {
     try {
       const { id } = req.params;
-      const db = getDatabase();
-      
-      // Get topic before deleting
-      db.get('SELECT topic FROM mqtt_topics WHERE id = ?', [id], async (err, row) => {
-        if (err) {
-          return res.status(500).json({ error: err.message });
-        }
-        
-        if (!row) {
-          return res.status(404).json({ error: 'Topic not found' });
-        }
-        
-        // Unsubscribe from MQTT
-        try {
-          await mqttService.unsubscribe(row.topic);
-        } catch (error) {
-          console.error('Error unsubscribing:', error);
-        }
-        
-        // Delete from database
-        db.run('DELETE FROM mqtt_topics WHERE id = ?', [id], function(err) {
-          if (err) {
-            return res.status(500).json({ error: err.message });
-          }
-          
-          res.json({ success: true });
+
+      // Find topic by ID
+      const topics = mqttService.getTopics();
+      const topicData = topics.find(t => t.id === id);
+
+      if (!topicData) {
+        return res.status(404).json({
+          error: 'Topic not found',
+          message: `No topic found with ID: ${id}`
         });
+      }
+
+      const result = await mqttService.deleteTopic(topicData.topic);
+
+      res.json({
+        success: true,
+        message: 'MQTT topic deleted successfully',
+        data: result
       });
+
     } catch (error) {
-      console.error('Error deleting topic:', error);
-      res.status(500).json({ error: error.message });
+      console.error('Error deleting MQTT topic:', error);
+      res.status(500).json({
+        error: 'Failed to delete MQTT topic',
+        message: error.message
+      });
     }
   }
 
-  async publish(req, res) {
+  /**
+   * Get MQTT messages
+   * GET /api/mqtt/messages
+   */
+  async getMessages(req, res) {
     try {
-      const { topic, message, qos, retain } = req.body;
-      
-      if (!topic || message === undefined) {
-        return res.status(400).json({ error: 'Topic and message are required' });
-      }
-      
-      await mqttService.publish(topic, message, { qos, retain });
-      res.json({ success: true, message: 'Message published successfully' });
+      const limit = parseInt(req.query.limit) || 20;
+      const messages = mqttService.getMessages(limit);
+
+      res.json({ messages });
+
     } catch (error) {
-      console.error('Error publishing message:', error);
-      
-      if (error.message === 'MQTT client not connected') {
-        return res.status(503).json({ error: error.message });
-      }
-      
-      res.status(500).json({ error: error.message });
+      console.error('Error getting MQTT messages:', error);
+      res.status(500).json({
+        error: 'Failed to get MQTT messages',
+        message: error.message
+      });
     }
   }
 
-  getMessages(req, res) {
-    const { topic, limit = 50 } = req.query;
-    const db = getDatabase();
-    
-    let query = 'SELECT * FROM mqtt_messages';
-    let params = [];
-    
-    if (topic) {
-      query += ' WHERE topic = ?';
-      params.push(topic);
-    }
-    
-    query += ' ORDER BY timestamp DESC LIMIT ?';
-    params.push(parseInt(limit));
-    
-    db.all(query, params, (err, rows) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
+  /**
+   * Publish a message to an MQTT topic
+   * POST /api/mqtt/publish
+   */
+  async publishMessage(req, res) {
+    try {
+      const { topic, message, qos = 0, retain = false } = req.body;
+
+      if (!topic) {
+        return res.status(400).json({
+          error: 'Topic is required',
+          message: 'Please provide a topic in the request body'
+        });
       }
-      res.json({ messages: rows });
-    });
+
+      if (message === undefined || message === null) {
+        return res.status(400).json({
+          error: 'Message is required',
+          message: 'Please provide a message in the request body'
+        });
+      }
+
+      const result = await mqttService.publish(topic, String(message), {
+        qos: parseInt(qos) || 0,
+        retain: Boolean(retain)
+      });
+
+      res.json({
+        success: true,
+        message: 'MQTT message published successfully',
+        data: result
+      });
+
+    } catch (error) {
+      console.error('Error publishing MQTT message:', error);
+      res.status(500).json({
+        error: 'Failed to publish MQTT message',
+        message: error.message
+      });
+    }
   }
 }
 
-module.exports = new MQTTController();
+module.exports = new MqttController();

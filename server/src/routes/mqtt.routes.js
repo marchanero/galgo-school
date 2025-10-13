@@ -6,11 +6,11 @@ const mqttController = require('../controllers/mqtt.controller');
  * @swagger
  * /api/mqtt/status:
  *   get:
- *     summary: Obtener estado de conexión MQTT
+ *     summary: Get MQTT connection status
  *     tags: [MQTT]
  *     responses:
  *       200:
- *         description: Estado de MQTT
+ *         description: MQTT connection status
  *         content:
  *           application/json:
  *             schema:
@@ -22,6 +22,10 @@ const mqttController = require('../controllers/mqtt.controller');
  *                   type: string
  *                 clientId:
  *                   type: string
+ *                 topics:
+ *                   type: array
+ *                   items:
+ *                     type: object
  */
 router.get('/status', mqttController.getStatus);
 
@@ -29,22 +33,27 @@ router.get('/status', mqttController.getStatus);
  * @swagger
  * /api/mqtt/connect:
  *   post:
- *     summary: Conectar al broker MQTT
+ *     summary: Connect to MQTT broker
  *     tags: [MQTT]
  *     requestBody:
+ *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - broker
  *             properties:
  *               broker:
  *                 type: string
- *                 example: mqtt://localhost:1883
- *               clientId:
- *                 type: string
+ *                 example: "mqtt://localhost:1883"
  *     responses:
  *       200:
- *         description: Conexión iniciada
+ *         description: Successfully connected to MQTT broker
+ *       400:
+ *         description: Invalid broker URL
+ *       500:
+ *         description: Connection failed
  */
 router.post('/connect', mqttController.connect);
 
@@ -52,11 +61,13 @@ router.post('/connect', mqttController.connect);
  * @swagger
  * /api/mqtt/disconnect:
  *   post:
- *     summary: Desconectar del broker MQTT
+ *     summary: Disconnect from MQTT broker
  *     tags: [MQTT]
  *     responses:
  *       200:
- *         description: Desconectado exitosamente
+ *         description: Successfully disconnected from MQTT broker
+ *       500:
+ *         description: Disconnection failed
  */
 router.post('/disconnect', mqttController.disconnect);
 
@@ -64,11 +75,11 @@ router.post('/disconnect', mqttController.disconnect);
  * @swagger
  * /api/mqtt/topics:
  *   get:
- *     summary: Obtener todos los topics MQTT
+ *     summary: Get all MQTT topics
  *     tags: [MQTT]
  *     responses:
  *       200:
- *         description: Lista de topics
+ *         description: List of MQTT topics
  *         content:
  *           application/json:
  *             schema:
@@ -77,15 +88,20 @@ router.post('/disconnect', mqttController.disconnect);
  *                 topics:
  *                   type: array
  *                   items:
- *                     $ref: '#/components/schemas/MQTTTopic'
- */
-router.get('/topics', mqttController.getAllTopics);
-
-/**
- * @swagger
- * /api/mqtt/topics:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       topic:
+ *                         type: string
+ *                       active:
+ *                         type: boolean
+ *                       qos:
+ *                         type: integer
+ *                       retained:
+ *                         type: boolean
  *   post:
- *     summary: Crear un nuevo topic MQTT
+ *     summary: Add a new MQTT topic
  *     tags: [MQTT]
  *     requestBody:
  *       required: true
@@ -98,36 +114,42 @@ router.get('/topics', mqttController.getAllTopics);
  *             properties:
  *               topic:
  *                 type: string
- *                 example: sensors/temperature
+ *                 example: "galgo/sensors/temperature"
  *               description:
  *                 type: string
- *                 example: Topic para sensores de temperatura
+ *                 example: "Temperature sensor readings"
  *               qos:
  *                 type: integer
- *                 example: 0
+ *                 default: 0
+ *                 minimum: 0
+ *                 maximum: 2
  *               retained:
  *                 type: boolean
- *                 example: false
+ *                 default: false
  *     responses:
  *       201:
- *         description: Topic creado
- *       409:
- *         description: Topic ya existe
+ *         description: Topic added successfully
+ *       400:
+ *         description: Invalid topic data
+ *       500:
+ *         description: Failed to add topic
  */
-router.post('/topics', mqttController.createTopic);
+router.get('/topics', mqttController.getTopics);
+router.post('/topics', mqttController.addTopic);
 
 /**
  * @swagger
  * /api/mqtt/topics/{id}:
  *   put:
- *     summary: Actualizar un topic MQTT
+ *     summary: Update an MQTT topic
  *     tags: [MQTT]
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
+ *         description: Topic ID
  *     requestBody:
  *       required: true
  *       content:
@@ -135,49 +157,89 @@ router.post('/topics', mqttController.createTopic);
  *           schema:
  *             type: object
  *             properties:
- *               topic:
- *                 type: string
- *               description:
- *                 type: string
+ *               active:
+ *                 type: boolean
  *               qos:
  *                 type: integer
+ *                 minimum: 0
+ *                 maximum: 2
  *               retained:
- *                 type: boolean
- *               active:
  *                 type: boolean
  *     responses:
  *       200:
- *         description: Topic actualizado
+ *         description: Topic updated successfully
  *       404:
- *         description: Topic no encontrado
- */
-router.put('/topics/:id', mqttController.updateTopic);
-
-/**
- * @swagger
- * /api/mqtt/topics/{id}:
+ *         description: Topic not found
+ *       500:
+ *         description: Failed to update topic
  *   delete:
- *     summary: Eliminar un topic MQTT
+ *     summary: Delete an MQTT topic
  *     tags: [MQTT]
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
+ *         description: Topic ID
  *     responses:
  *       200:
- *         description: Topic eliminado
+ *         description: Topic deleted successfully
  *       404:
- *         description: Topic no encontrado
+ *         description: Topic not found
+ *       500:
+ *         description: Failed to delete topic
  */
+router.put('/topics/:id', mqttController.updateTopic);
 router.delete('/topics/:id', mqttController.deleteTopic);
+
+/**
+ * @swagger
+ * /api/mqtt/messages:
+ *   get:
+ *     summary: Get recent MQTT messages
+ *     tags: [MQTT]
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           minimum: 1
+ *           maximum: 100
+ *         description: Maximum number of messages to return
+ *     responses:
+ *       200:
+ *         description: List of recent MQTT messages
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 messages:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       topic:
+ *                         type: string
+ *                       message:
+ *                         type: string
+ *                       qos:
+ *                         type: integer
+ *                       retain:
+ *                         type: boolean
+ *                       timestamp:
+ *                         type: string
+ *                         format: date-time
+ */
+router.get('/messages', mqttController.getMessages);
 
 /**
  * @swagger
  * /api/mqtt/publish:
  *   post:
- *     summary: Publicar un mensaje MQTT
+ *     summary: Publish a message to an MQTT topic
  *     tags: [MQTT]
  *     requestBody:
  *       required: true
@@ -191,57 +253,26 @@ router.delete('/topics/:id', mqttController.deleteTopic);
  *             properties:
  *               topic:
  *                 type: string
- *                 example: sensors/temperature
+ *                 example: "galgo/sensors/temperature"
  *               message:
  *                 type: string
- *                 example: "25.5"
+ *                 example: "23.5"
  *               qos:
  *                 type: integer
- *                 example: 0
+ *                 default: 0
+ *                 minimum: 0
+ *                 maximum: 2
  *               retain:
  *                 type: boolean
- *                 example: false
+ *                 default: false
  *     responses:
  *       200:
- *         description: Mensaje publicado
+ *         description: Message published successfully
  *       400:
- *         description: Datos inválidos
- *       503:
- *         description: Cliente MQTT no conectado
+ *         description: Invalid message data
+ *       500:
+ *         description: Failed to publish message
  */
-router.post('/publish', mqttController.publish);
-
-/**
- * @swagger
- * /api/mqtt/messages:
- *   get:
- *     summary: Obtener historial de mensajes MQTT
- *     tags: [MQTT]
- *     parameters:
- *       - in: query
- *         name: topic
- *         schema:
- *           type: string
- *         description: Filtrar por topic
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 50
- *         description: Número máximo de mensajes
- *     responses:
- *       200:
- *         description: Lista de mensajes
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 messages:
- *                   type: array
- *                   items:
- *                     type: object
- */
-router.get('/messages', mqttController.getMessages);
+router.post('/publish', mqttController.publishMessage);
 
 module.exports = router;

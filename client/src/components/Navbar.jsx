@@ -1,6 +1,6 @@
 import { useTheme } from '../contexts/ThemeContext'
 
-const Navbar = ({ currentSection, setCurrentSection, setConfigTab }) => {
+const Navbar = ({ currentSection, setCurrentSection, setConfigTab, mqttStatus }) => {
   const { theme, toggleTheme } = useTheme()
 
   const sections = ['Dashboard', 'Configuración']
@@ -16,6 +16,17 @@ const Navbar = ({ currentSection, setCurrentSection, setConfigTab }) => {
             <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">Research Platform</span>
           </div>
           <div className="flex items-center space-x-6">
+            {/* MQTT Status Indicator */}
+            <div className="flex items-center space-x-2 px-3 py-1 rounded-lg bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600">
+              <div className={`w-2 h-2 rounded-full ${mqttStatus?.connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+              <span className={`text-xs font-medium ${mqttStatus?.connected ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                MQTT
+              </span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {mqttStatus?.connected ? 'Conectado' : 'Desconectado'}
+              </span>
+            </div>
+
             {sections.map(section => (
               <button
                 key={section}

@@ -1,232 +1,350 @@
 const mqtt = require('mqtt');
-const appConfig = require('../config/app.config');
-const { getDatabase } = require('../config/database');
+const EventEmitter = require('events');
 
-class MQTTService {
+class MqttService extends EventEmitter {
   constructor() {
+    super();
     this.client = null;
-    this.isInitializing = false;
+    this.isConnected = false;
+    this.broker = null;
+    this.clientId = null;
+    this.topics = new Map(); // topic -> { active, qos, retained }
+    this.messages = []; // Array to store recent messages
+    this.maxMessages = 100; // Maximum messages to store
   }
 
-  initialize() {
-    // Prevent multiple simultaneous initializations
-    if (this.isInitializing) {
-      console.log('⚠️ MQTT initialization already in progress...');
-      return this.client;
-    }
-
-    this.isInitializing = true;
-
-    // Close existing connection if any
-    if (this.client) {
+  /**
+   * Connect to MQTT broker
+   * @param {string} brokerUrl - MQTT broker URL (e.g., 'mqtt://localhost:1883')
+   * @param {Object} options - Connection options
+   */
+  connect(brokerUrl, options = {}) {
+    return new Promise((resolve, reject) => {
       try {
-        this.client.removeAllListeners(); // Remove old listeners
-        this.client.end(true); // Force close
-      } catch (err) {
-        console.log('Error closing previous connection:', err.message);
-      }
-      this.client = null;
-    }
+        // Generate unique client ID
+        this.clientId = `galgo-api-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    console.log(`🔄 Initializing MQTT connection to ${appConfig.mqtt.broker}...`);
-    console.log(`   Client ID: ${appConfig.mqtt.clientId}`);
+        const defaultOptions = {
+          clientId: this.clientId,
+          clean: true,
+          connectTimeout: 4000,
+          reconnectPeriod: 1000,
+          keepalive: 60,
+          ...options
+        };
 
-    this.client = mqtt.connect(appConfig.mqtt.broker, {
-      clientId: appConfig.mqtt.clientId, // Use fixed client ID - no timestamp suffix
-      username: appConfig.mqtt.username,
-      password: appConfig.mqtt.password,
-      clean: true, // Clean session will disconnect any existing session with same client ID
-      connectTimeout: 5000,
-      reconnectPeriod: 5000, // Retry every 5 seconds
-      keepalive: 60, // Keep connection alive with pings every 60 seconds
-      protocolVersion: 4, // MQTT 3.1.1
-      protocolId: 'MQTT',
-      resubscribe: false, // Manual resubscription for better control
-    });
+        console.log(`Connecting to MQTT broker: ${brokerUrl}`);
+        this.client = mqtt.connect(brokerUrl, defaultOptions);
+        this.broker = brokerUrl;
 
-    this.setupEventHandlers();
-    this.isInitializing = false;
-    
-    return this.client;
-  }
+        // Connection successful
+        this.client.on('connect', () => {
+          console.log(`✅ Connected to MQTT broker: ${brokerUrl}`);
+          this.isConnected = true;
+          this.emit('connected', { broker: brokerUrl, clientId: this.clientId });
 
-  setupEventHandlers() {
-    this.client.on('connect', (connack) => {
-      console.log(`✅ Connected to MQTT broker: ${appConfig.mqtt.broker}`);
-      console.log(`   Session present: ${connack.sessionPresent}`);
-      
-      // Wait for connection to stabilize before subscribing
-      setTimeout(() => {
-        if (this.client && this.client.connected) {
-          this.subscribeToActiveTopics();
+          // Re-subscribe to active topics
+          this.resubscribeToActiveTopics();
+
+          resolve({ success: true, broker: brokerUrl, clientId: this.clientId });
+        });
+
+        // Connection error
+        this.client.on('error', (error) => {
+          console.error('❌ MQTT connection error:', error.message);
+          this.isConnected = false;
+          this.emit('error', error);
           
-          // Publish online status
-          this.client.publish('galgo/school/status', JSON.stringify({ 
-            status: 'online', 
-            timestamp: new Date().toISOString(),
-            clientId: appConfig.mqtt.clientId
-          }), { qos: 0, retain: true }, (err) => {
-            if (err) {
-              console.error('Error publishing status:', err.message);
-            }
-          });
-        }
-      }, 1000);
-    });
-
-    this.client.on('message', (topic, message, packet) => {
-      this.handleMessage(topic, message, packet);
-    });
-
-    this.client.on('error', (error) => {
-      console.error(`❌ MQTT error: ${error.message}`);
-    });
-
-    this.client.on('offline', () => {
-      console.log('⚠️ MQTT client offline');
-    });
-
-    this.client.on('reconnect', () => {
-      console.log('🔄 MQTT reconnecting...');
-    });
-
-    this.client.on('close', () => {
-      console.log('🔌 MQTT connection closed');
-    });
-
-    this.client.on('disconnect', (packet) => {
-      console.log('🔌 MQTT disconnected');
-    });
-
-    this.client.on('end', () => {
-      console.log('🏁 MQTT client ended');
-    });
-  }
-
-  subscribeToActiveTopics() {
-    const db = getDatabase();
-    
-    db.all('SELECT topic FROM mqtt_topics WHERE active = 1', [], (err, rows) => {
-      if (err) {
-        console.error('❌ Error getting topics:', err);
-        return;
-      }
-
-      if (rows.length === 0) {
-        console.log('ℹ️  No active topics to subscribe to');
-        return;
-      }
-
-      rows.forEach(row => {
-        this.client.subscribe(row.topic, { qos: 0 }, (err) => {
-          if (err) {
-            console.error(`❌ Error subscribing to ${row.topic}:`, err);
-          } else {
-            console.log(`✅ Subscribed to topic: ${row.topic}`);
+          // Don't reject if promise already resolved
+          if (reject) {
+            reject(error);
+            reject = null; // Prevent multiple calls
           }
         });
-      });
+
+        // Connection close
+        this.client.on('close', () => {
+          console.log('🔌 MQTT connection closed');
+          this.isConnected = false;
+          this.emit('disconnected');
+        });
+
+        // Connection offline
+        this.client.on('offline', () => {
+          console.log('📡 MQTT client offline');
+          this.isConnected = false;
+          this.emit('offline');
+        });
+
+        // Connection timeout
+        this.client.on('end', () => {
+          console.log('🔌 MQTT connection ended');
+          this.isConnected = false;
+        });
+
+        // Prevent uncaught exceptions
+        this.client.on('disconnect', () => {
+          console.log('🔌 MQTT disconnected');
+          this.isConnected = false;
+          this.emit('disconnected');
+        });
+
+        // Reconnect
+        this.client.on('reconnect', () => {
+          console.log('🔄 MQTT reconnecting...');
+          this.emit('reconnecting');
+        });
+
+        // Message received
+        this.client.on('message', (topic, message, packet) => {
+          const messageData = {
+            topic,
+            message: message.toString(),
+            qos: packet.qos,
+            retain: packet.retain,
+            timestamp: new Date().toISOString()
+          };
+
+          // Store message
+          this.messages.unshift(messageData);
+          if (this.messages.length > this.maxMessages) {
+            this.messages = this.messages.slice(0, this.maxMessages);
+          }
+
+          console.log(`�� MQTT message received: ${topic} -> ${message.toString()}`);
+          this.emit('message', messageData);
+        });
+
+      } catch (error) {
+        console.error('❌ Error creating MQTT client:', error);
+        reject(error);
+      }
     });
   }
 
-  handleMessage(topic, message, packet) {
-    const messageStr = message.toString();
-    console.log(`📨 MQTT Message - Topic: ${topic}, Message: ${messageStr}`);
-
-    const db = getDatabase();
-    db.run(
-      'INSERT INTO mqtt_messages (topic, message, qos, retain) VALUES (?, ?, ?, ?)',
-      [topic, messageStr, packet.qos, packet.retain],
-      (err) => {
-        if (err) {
-          console.error('❌ Error storing MQTT message:', err);
-        }
+  /**
+   * Disconnect from MQTT broker
+   */
+  disconnect() {
+    return new Promise((resolve) => {
+      if (this.client && this.isConnected) {
+        console.log('Disconnecting from MQTT broker...');
+        this.client.end(false, () => {
+          this.isConnected = false;
+          this.client = null;
+          this.emit('disconnected');
+          console.log('✅ Disconnected from MQTT broker');
+          resolve({ success: true });
+        });
+      } else {
+        resolve({ success: true, message: 'Already disconnected' });
       }
-    );
+    });
   }
 
+  /**
+   * Get connection status
+   */
   getStatus() {
     return {
-      connected: this.client && this.client.connected,
-      reconnecting: this.client && this.client.reconnecting,
-      broker: appConfig.mqtt.broker,
-      clientId: appConfig.mqtt.clientId,
-      timestamp: new Date().toISOString(),
+      connected: this.isConnected,
+      broker: this.broker,
+      clientId: this.clientId,
+      topics: Array.from(this.topics.entries()).map(([topic, config]) => ({
+        topic,
+        ...config
+      }))
     };
   }
 
-  subscribe(topic, qos = 0) {
+  /**
+   * Subscribe to a topic
+   * @param {string} topic - MQTT topic
+   * @param {Object} options - Subscription options
+   */
+  subscribe(topic, options = {}) {
     return new Promise((resolve, reject) => {
-      if (!this.client || !this.client.connected) {
-        return reject(new Error('MQTT client not connected'));
+      if (!this.client || !this.isConnected) {
+        reject(new Error('MQTT client not connected'));
+        return;
       }
 
-      this.client.subscribe(topic, { qos }, (err) => {
-        if (err) {
-          reject(err);
+      const { qos = 0, active = true } = options;
+
+      this.client.subscribe(topic, { qos }, (error, granted) => {
+        if (error) {
+          console.error(`❌ Error subscribing to ${topic}:`, error);
+          reject(error);
         } else {
-          resolve();
+          // Store topic configuration
+          this.topics.set(topic, { active, qos, retained: false });
+          console.log(`✅ Subscribed to topic: ${topic} (QoS: ${qos})`);
+          this.emit('subscribed', { topic, qos, granted });
+          resolve({ topic, qos, granted });
         }
       });
     });
   }
 
+  /**
+   * Unsubscribe from a topic
+   * @param {string} topic - MQTT topic
+   */
   unsubscribe(topic) {
     return new Promise((resolve, reject) => {
-      if (!this.client || !this.client.connected) {
-        return reject(new Error('MQTT client not connected'));
+      if (!this.client || !this.isConnected) {
+        reject(new Error('MQTT client not connected'));
+        return;
       }
 
-      this.client.unsubscribe(topic, (err) => {
-        if (err) {
-          reject(err);
+      this.client.unsubscribe(topic, (error) => {
+        if (error) {
+          console.error(`❌ Error unsubscribing from ${topic}:`, error);
+          reject(error);
         } else {
-          resolve();
+          // Remove topic from stored topics
+          this.topics.delete(topic);
+          console.log(`✅ Unsubscribed from topic: ${topic}`);
+          this.emit('unsubscribed', { topic });
+          resolve({ topic });
         }
       });
     });
   }
 
+  /**
+   * Publish a message to a topic
+   * @param {string} topic - MQTT topic
+   * @param {string} message - Message payload
+   * @param {Object} options - Publish options
+   */
   publish(topic, message, options = {}) {
     return new Promise((resolve, reject) => {
-      if (!this.client || !this.client.connected) {
-        return reject(new Error('MQTT client not connected'));
+      if (!this.client || !this.isConnected) {
+        reject(new Error('MQTT client not connected'));
+        return;
       }
 
-      const publishOptions = {
-        qos: options.qos || 0,
-        retain: options.retain || false,
-      };
+      const { qos = 0, retain = false } = options;
 
-      this.client.publish(topic, message.toString(), publishOptions, (err) => {
-        if (err) {
-          reject(err);
+      this.client.publish(topic, message, { qos, retain }, (error) => {
+        if (error) {
+          console.error(`❌ Error publishing to ${topic}:`, error);
+          reject(error);
         } else {
-          resolve();
+          console.log(`📤 Published message to ${topic}: ${message}`);
+          this.emit('published', { topic, message, qos, retain });
+          resolve({ topic, message, qos, retain });
         }
       });
     });
   }
 
-  disconnect() {
-    if (this.client) {
-      // Publish offline status before disconnecting
-      try {
-        this.client.publish('galgo/school/status', JSON.stringify({ 
-          status: 'offline', 
-          timestamp: new Date().toISOString(),
-          clientId: appConfig.mqtt.clientId
-        }), { qos: 0, retain: true });
-      } catch (err) {
-        console.error('Error publishing offline status:', err.message);
+  /**
+   * Get all topics
+   */
+  getTopics() {
+    return Array.from(this.topics.entries()).map(([topic, config]) => ({
+      id: topic.replace(/[^a-zA-Z0-9]/g, '_'), // Create ID from topic
+      topic,
+      ...config
+    }));
+  }
+
+  /**
+   * Get recent messages
+   * @param {number} limit - Maximum number of messages to return
+   */
+  getMessages(limit = 20) {
+    return this.messages.slice(0, limit);
+  }
+
+  /**
+   * Update topic configuration
+   * @param {string} topic - MQTT topic
+   * @param {Object} updates - Updates to apply
+   */
+  updateTopic(topic, updates) {
+    if (this.topics.has(topic)) {
+      const currentConfig = this.topics.get(topic);
+      const newConfig = { ...currentConfig, ...updates };
+      this.topics.set(topic, newConfig);
+
+      // If active status changed, subscribe/unsubscribe accordingly
+      if (updates.active !== undefined) {
+        if (updates.active && !currentConfig.active) {
+          // Was inactive, now active - subscribe
+          return this.subscribe(topic, newConfig);
+        } else if (!updates.active && currentConfig.active) {
+          // Was active, now inactive - unsubscribe
+          return this.unsubscribe(topic);
+        }
       }
 
-      this.client.end(false, {}, () => {
-        console.log('✅ MQTT client disconnected cleanly');
+      return Promise.resolve({ topic, ...newConfig });
+    } else {
+      throw new Error(`Topic ${topic} not found`);
+    }
+  }
+
+  /**
+   * Delete a topic
+   * @param {string} topic - MQTT topic
+   */
+  deleteTopic(topic) {
+    if (this.topics.has(topic)) {
+      // Unsubscribe first if active
+      const config = this.topics.get(topic);
+      if (config.active) {
+        return this.unsubscribe(topic).then(() => {
+          this.topics.delete(topic);
+          return { topic };
+        });
+      } else {
+        this.topics.delete(topic);
+        return Promise.resolve({ topic });
+      }
+    } else {
+      throw new Error(`Topic ${topic} not found`);
+    }
+  }
+
+  /**
+   * Add a topic to the list (without subscribing)
+   * @param {string} topic - MQTT topic
+   * @param {Object} options - Topic options
+   */
+  addTopic(topic, options = {}) {
+    const { qos = 0, retained = false, active = false } = options;
+    this.topics.set(topic, { active, qos, retained });
+
+    // Subscribe if active
+    if (active) {
+      return this.subscribe(topic, { qos });
+    }
+
+    return Promise.resolve({ topic, active, qos, retained });
+  }
+
+  /**
+   * Re-subscribe to all active topics (called after reconnection)
+   */
+  resubscribeToActiveTopics() {
+    const activeTopics = Array.from(this.topics.entries())
+      .filter(([, config]) => config.active);
+
+    if (activeTopics.length > 0) {
+      console.log(`Re-subscribing to ${activeTopics.length} active topics...`);
+      activeTopics.forEach(([topic, config]) => {
+        this.subscribe(topic, config).catch(error => {
+          console.error(`Failed to re-subscribe to ${topic}:`, error);
+        });
       });
-      this.client = null;
     }
   }
 }
 
-module.exports = new MQTTService();
+// Create singleton instance
+const mqttService = new MqttService();
+
+module.exports = mqttService;

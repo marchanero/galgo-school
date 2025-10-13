@@ -1,12 +1,12 @@
-const mqttService = require('../services/mqtt.service');
 const { getDatabase } = require('../config/database');
 const appConfig = require('../config/app.config');
+const mqttService = require('../services/mqtt.service');
 
 class HealthController {
   getHealth(req, res) {
     try {
-      const mqttStatus = mqttService.getStatus();
       const db = getDatabase();
+      const mqttStatus = mqttService.getStatus();
 
       // Test database connection
       db.get('SELECT 1', [], (err) => {
