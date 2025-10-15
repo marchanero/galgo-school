@@ -57,7 +57,7 @@ class MqttService extends EventEmitter {
     const defaultOptions = {
       clientId: this.clientId,
       clean: false, // Keep session for persistent connection
-      connectTimeout: 10000, // Longer timeout
+      connectTimeout: 30000, // Increased timeout to 30 seconds
       reconnectPeriod: 5000, // Reconnect every 5 seconds if disconnected
       keepalive: 120, // Keep connection alive with 2-minute ping interval
       resubscribe: true, // Automatically resubscribe on reconnect

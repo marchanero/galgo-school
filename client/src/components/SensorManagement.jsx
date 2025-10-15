@@ -3,7 +3,7 @@ import toast from 'react-hot-toast'
 import { useFormValidation, validationRules } from '../hooks/useFormValidation'
 
 // API URL - use environment variable for Docker deployment
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3001'
 
 function SensorManagement({ sensors, mqttTopics, onSensorUpdate, onTopicUpdate }) {
   const [editingSensor, setEditingSensor] = useState(null)
