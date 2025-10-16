@@ -1,44 +1,27 @@
-// App.tsx
-import React, { useState, useEffect } from 'react';
+// App.tsx - Versión simplificada para usuario final
+import { useState, useEffect } from 'react';
 import axios from 'axios';
-import Navbar from './components/Navbar';
-import MqttConnectionStatus from './components/MqttConnectionStatus';
+import { ThemeProvider } from './contexts/ThemeContext';
 import SensorCard from './components/SensorCard';
-import type { MqttStatus, Sensor, Configuration } from './types';
+import type { MqttStatus, Sensor } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 function App() {
-  const [activeTab, setActiveTab] = useState('general');
   const [mqttStatus, setMqttStatus] = useState<MqttStatus>({
     connected: false,
     broker: null,
     clientId: null,
     lastChecked: null
   });
-  const [mqttConnecting, setMqttConnecting] = useState(false);
   const [sensors, setSensors] = useState<Sensor[]>([]);
-  const [configuration, setConfiguration] = useState<Configuration>({
-    mqtt: {
-      broker: 'mqtt://100.107.238.60:1883',
-      username: 'admin',
-      password: 'galgo2526',
-      autoConnect: true,
-      autoPolling: true
-    },
-    recording: {
-      autoStart: false,
-      duration: 60,
-      format: 'mp4'
-    },
-    cameras: [],
-    sensors: []
-  });
+  const [loading, setLoading] = useState(true);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
 
   // Fetch initial MQTT status
   const fetchInitialMqttStatus = async () => {
     console.log('🚀 fetchInitialMqttStatus - Consultando estado inicial del broker MQTT...');
-    console.log('🌐 URL:', `${API_URL}/api/mqtt/status`);
     try {
       const response = await axios.get(`${API_URL}/api/mqtt/status`);
       console.log('✅ fetchInitialMqttStatus - Estado recibido del servidor:', response.data);
@@ -52,6 +35,50 @@ function App() {
       }));
     } catch (error) {
       console.error('❌ fetchInitialMqttStatus - Error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch sensors
+  const fetchSensors = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/api/sensors`);
+      setSensors(response.data);
+    } catch (error) {
+      console.error('❌ Error fetching sensors:', error);
+    }
+  };
+
+  // Recording timer
+  useEffect(() => {
+    let interval: number;
+    if (isRecording) {
+      interval = window.setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (interval) window.clearInterval(interval);
+    };
+  }, [isRecording]);
+
+  // Toggle recording
+  const toggleRecording = async () => {
+    try {
+      if (isRecording) {
+        // Stop recording
+        await axios.post(`${API_URL}/api/recording/stop`);
+        setIsRecording(false);
+        setRecordingDuration(0);
+      } else {
+        // Start recording
+        await axios.post(`${API_URL}/api/recording/start`);
+        setIsRecording(true);
+        setRecordingDuration(0);
+      }
+    } catch (error) {
+      console.error('❌ Error toggling recording:', error);
     }
   };
 
@@ -83,45 +110,147 @@ function App() {
     };
   }, []);
 
-  // Monitor MQTT status changes
-  useEffect(() => {
-    console.log('🔔 Estado MQTT actualizado:', mqttStatus);
-  }, [mqttStatus]);
-
   // Initial load
   useEffect(() => {
     fetchInitialMqttStatus();
+    fetchSensors();
   }, []);
 
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'general':
-        return (
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  if (loading) {
+    return (
+      <ThemeProvider>
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+            <p className="text-gray-600 dark:text-gray-300">Cargando Galgo Config...</p>
+          </div>
+        </div>
+      </ThemeProvider>
+    );
+  }
+
+  return (
+    <ThemeProvider>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        {/* Header simple */}
+        <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center h-16">
+              <div className="flex items-center">
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Galgo Config
+                </h1>
+                <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">
+                  Monitor de Sistema
+                </span>
+              </div>
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                v2.0.0
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           <div className="space-y-6">
+            {/* Sistema de Grabación */}
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-                Configuración General
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+                Sistema de Grabación
               </h2>
               <div className="card">
-                <p className="text-gray-600 dark:text-gray-300">
-                  Configuración general del sistema Galgo.
-                </p>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className={`w-4 h-4 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-gray-400'}`}></div>
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">
+                        {isRecording ? 'Grabando...' : 'Detenido'}
+                      </p>
+                      {isRecording && (
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          Duración: {formatDuration(recordingDuration)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={toggleRecording}
+                    className={`btn-primary ${isRecording ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
+                    disabled={!mqttStatus.connected}
+                  >
+                    {isRecording ? (
+                      <>
+                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                        </svg>
+                        Detener
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1.586a1 1 0 01.707.293l.707.707A1 1 0 0012.414 11H15m-3 7.5A9.5 9.5 0 1121.5 12 9.5 9.5 0 0112 2.5z" />
+                        </svg>
+                        Iniciar Grabación
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
 
-            <MqttConnectionStatus
-              mqttStatus={mqttStatus}
-              mqttConnecting={mqttConnecting}
-            />
-          </div>
-        );
-
-      case 'sensors':
-        return (
-          <div className="space-y-6">
+            {/* Broker Conectado */}
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-                Sensores
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+                Broker MQTT
+              </h2>
+              <div className="card">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <span className="font-medium text-gray-700 dark:text-gray-300">Estado:</span>
+                    <span className={`ml-2 px-2 py-1 rounded-full text-xs ${
+                      mqttStatus.connected
+                        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                        : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                    }`}>
+                      {mqttStatus.connected ? 'Conectado' : 'Desconectado'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-700 dark:text-gray-300">Broker:</span>
+                    <span className="ml-2 text-gray-600 dark:text-gray-400">
+                      {mqttStatus.broker || 'No disponible'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-700 dark:text-gray-300">Client ID:</span>
+                    <span className="ml-2 text-gray-600 dark:text-gray-400">
+                      {mqttStatus.clientId || 'No disponible'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-700 dark:text-gray-300">Última verificación:</span>
+                    <span className="ml-2 text-gray-600 dark:text-gray-400">
+                      {mqttStatus.lastChecked
+                        ? new Date(mqttStatus.lastChecked).toLocaleTimeString('es-ES')
+                        : 'Nunca'
+                      }
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Dispositivos Conectados */}
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+                Dispositivos Conectados
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {sensors.length > 0 ? (
@@ -130,159 +259,21 @@ function App() {
                   ))
                 ) : (
                   <div className="col-span-full card text-center">
-                    <p className="text-gray-600 dark:text-gray-300">
-                      No hay sensores configurados
-                    </p>
+                    <div className="text-gray-500 dark:text-gray-400">
+                      <svg className="mx-auto h-12 w-12 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                      </svg>
+                      <p>No hay dispositivos conectados en este momento</p>
+                      <p className="text-sm mt-1">Los dispositivos aparecerán aquí automáticamente cuando se conecten.</p>
+                    </div>
                   </div>
                 )}
               </div>
             </div>
           </div>
-        );
-
-      case 'cameras':
-        return (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-                Cámaras
-              </h2>
-              <div className="card">
-                <p className="text-gray-600 dark:text-gray-300">
-                  Gestión de cámaras IP.
-                </p>
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'recordings':
-        return (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-                Grabaciones
-              </h2>
-              <div className="card">
-                <p className="text-gray-600 dark:text-gray-300">
-                  Gestión de grabaciones automáticas.
-                </p>
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'mqtt':
-        return (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-                Configuración MQTT
-              </h2>
-              <div className="card">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Broker URL
-                    </label>
-                    <input
-                      type="text"
-                      value={configuration.mqtt.broker}
-                      onChange={(e) => setConfiguration(prev => ({
-                        ...prev,
-                        mqtt: { ...prev.mqtt, broker: e.target.value }
-                      }))}
-                      className="input-field"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Usuario
-                      </label>
-                      <input
-                        type="text"
-                        value={configuration.mqtt.username}
-                        onChange={(e) => setConfiguration(prev => ({
-                          ...prev,
-                          mqtt: { ...prev.mqtt, username: e.target.value }
-                        }))}
-                        className="input-field"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Contraseña
-                      </label>
-                      <input
-                        type="password"
-                        value={configuration.mqtt.password}
-                        onChange={(e) => setConfiguration(prev => ({
-                          ...prev,
-                          mqtt: { ...prev.mqtt, password: e.target.value }
-                        }))}
-                        className="input-field"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center space-x-4">
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={configuration.mqtt.autoConnect}
-                        onChange={(e) => setConfiguration(prev => ({
-                          ...prev,
-                          mqtt: { ...prev.mqtt, autoConnect: e.target.checked }
-                        }))}
-                        className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-                      />
-                      <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
-                        Conexión automática
-                      </span>
-                    </label>
-
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={configuration.mqtt.autoPolling}
-                        onChange={(e) => setConfiguration(prev => ({
-                          ...prev,
-                          mqtt: { ...prev.mqtt, autoPolling: e.target.checked }
-                        }))}
-                        className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-                      />
-                      <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
-                        Polling automático
-                      </span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <MqttConnectionStatus
-              mqttStatus={mqttStatus}
-              mqttConnecting={mqttConnecting}
-            />
-          </div>
-        );
-
-      default:
-        return null;
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
-
-      <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-        {renderTabContent()}
-      </main>
-    </div>
+        </main>
+      </div>
+    </ThemeProvider>
   );
 }
 

@@ -1,6 +1,22 @@
-# Galgo Config Client 2
+# Galgo Config Client 2 - Monitor de Sistema
 
-Aplicación React + TypeScript + Vite para la configuración del sistema Galgo.
+Aplicación React + TypeScript + Vite simplificada para **usuarios finales** que necesitan monitorizar el sistema Galgo sin opciones de configuración avanzada.
+
+## Propósito
+
+Esta aplicación está diseñada específicamente para **usuarios finales** que solo necesitan:
+
+- ✅ **Control del sistema de grabación** (iniciar/detener grabaciones)
+- ✅ **Ver el estado del broker MQTT** al que está conectado el sistema
+- ✅ **Lista de dispositivos conectados** al sistema
+
+**No incluye** opciones de configuración avanzada como:
+- ❌ Configuración de MQTT
+- ❌ Gestión de cámaras
+- ❌ Configuración de sensores
+- ❌ Ajustes del sistema
+
+Para configuración avanzada del sistema, use la aplicación principal en `/client`.
 
 ## Características
 
@@ -8,8 +24,10 @@ Aplicación React + TypeScript + Vite para la configuración del sistema Galgo.
 - **Vite** para desarrollo rápido
 - **Tailwind CSS** para estilos
 - **Tema oscuro/claro** automático
-- **Componentes modulares** con TypeScript
-- **Integración MQTT** con estado en tiempo real
+- **Interfaz simplificada** enfocada en monitorización
+- **Control de grabación** con temporizador visual
+- **Estado del broker MQTT** en tiempo real
+- **Lista de dispositivos conectados**
 - **Responsive design** para móviles y desktop
 
 ## Instalación y ejecución
@@ -51,11 +69,31 @@ VITE_API_URL=http://localhost:3001
 ```
 client2/
 ├── src/
-│   ├── components/     # Componentes React
-│   ├── contexts/       # Contextos React
+│   ├── components/     # Componentes React (SensorCard)
+│   ├── contexts/       # Contextos React (ThemeContext)
 │   ├── types/          # Definiciones TypeScript
-│   ├── App.tsx         # Componente principal
+│   ├── App.tsx         # Componente principal simplificado
 │   └── main.tsx        # Punto de entrada
 ├── public/             # Archivos estáticos
 └── package.json
 ```
+
+## Funcionalidades principales
+
+### Sistema de Grabación
+- Botón para iniciar/detener grabaciones
+- Indicador visual de estado (rojo = grabando, gris = detenido)
+- Temporizador que muestra la duración de la grabación actual
+- Solo funciona cuando el broker MQTT está conectado
+
+### Broker MQTT
+- Estado de conexión (Conectado/Desconectado)
+- Información del broker al que está conectado
+- Client ID del sistema
+- Última verificación del estado
+
+### Dispositivos Conectados
+- Lista visual de todos los sensores conectados
+- Estado de cada dispositivo (online/offline)
+- Información detallada de cada sensor
+- Actualización automática cada pocos segundos
