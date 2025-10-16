@@ -1,9 +1,9 @@
 // App.tsx - Versión simplificada para usuario final
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { ThemeProvider } from './contexts/ThemeContext';
 import Navbar from './components/Navbar';
 import SensorCard from './components/SensorCard';
+import RecordingControl from './components/RecordingControl';
 import type { MqttStatus, Sensor } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -17,8 +17,10 @@ function App() {
   });
   const [sensors, setSensors] = useState<Sensor[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isRecording, setIsRecording] = useState(false);
+  const [recordingState, setRecordingState] = useState<'idle' | 'recording' | 'paused' | 'finished'>('idle');
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [pausedTime, setPausedTime] = useState(0);
+  const [totalRecordingTime, setTotalRecordingTime] = useState(0);
 
   // Fetch initial MQTT status
   const fetchInitialMqttStatus = async () => {
@@ -54,32 +56,68 @@ function App() {
   // Recording timer
   useEffect(() => {
     let interval: number;
-    if (isRecording) {
+    if (recordingState === 'recording') {
       interval = window.setInterval(() => {
         setRecordingDuration(prev => prev + 1);
+        setTotalRecordingTime(prev => prev + 1);
+      }, 1000);
+    } else if (recordingState === 'paused') {
+      interval = window.setInterval(() => {
+        setPausedTime(prev => prev + 1);
       }, 1000);
     }
     return () => {
       if (interval) window.clearInterval(interval);
     };
-  }, [isRecording]);
+  }, [recordingState]);
 
-  // Toggle recording
-  const toggleRecording = async () => {
+  // Recording functions
+  const startRecording = async () => {
     try {
-      if (isRecording) {
-        // Stop recording
-        await axios.post(`${API_URL}/api/recording/stop`);
-        setIsRecording(false);
-        setRecordingDuration(0);
-      } else {
-        // Start recording
-        await axios.post(`${API_URL}/api/recording/start`);
-        setIsRecording(true);
-        setRecordingDuration(0);
-      }
+      await axios.post(`${API_URL}/api/recording/start`);
+      setRecordingState('recording');
+      setRecordingDuration(0);
+      setPausedTime(0);
+      setTotalRecordingTime(0);
     } catch (error) {
-      console.error('❌ Error toggling recording:', error);
+      console.error('❌ Error starting recording:', error);
+    }
+  };
+
+  const pauseRecording = async () => {
+    try {
+      setRecordingState('paused');
+    } catch (error) {
+      console.error('❌ Error pausing recording:', error);
+    }
+  };
+
+  const resumeRecording = async () => {
+    try {
+      setRecordingState('recording');
+    } catch (error) {
+      console.error('❌ Error resuming recording:', error);
+    }
+  };
+
+  const stopRecording = async () => {
+    try {
+      await axios.post(`${API_URL}/api/recording/stop`);
+      setRecordingState('idle');
+      setRecordingDuration(0);
+      setPausedTime(0);
+      setTotalRecordingTime(0);
+    } catch (error) {
+      console.error('❌ Error stopping recording:', error);
+    }
+  };
+
+  const finishRecording = async () => {
+    try {
+      await axios.post(`${API_URL}/api/recording/stop`);
+      setRecordingState('finished');
+    } catch (error) {
+      console.error('❌ Error finishing recording:', error);
     }
   };
 
@@ -117,77 +155,72 @@ function App() {
     fetchSensors();
   }, []);
 
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
   if (loading) {
     return (
-      <ThemeProvider>
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-            <p className="text-gray-600 dark:text-gray-300">Cargando Galgo Config...</p>
-          </div>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-300">Cargando Galgo Config...</p>
         </div>
-      </ThemeProvider>
+      </div>
     );
   }
 
   return (
-    <ThemeProvider>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         <Navbar />
 
         <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           <div className="space-y-6">
-            {/* Sistema de Grabación */}
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
-                Sistema de Grabación
-              </h2>
-              <div className="card">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <div className={`w-4 h-4 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-gray-400'}`}></div>
-                    <div>
-                      <p className="font-medium text-gray-900 dark:text-white">
-                        {isRecording ? 'Grabando...' : 'Detenido'}
-                      </p>
-                      {isRecording && (
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          Duración: {formatDuration(recordingDuration)}
-                        </p>
-                      )}
+            {/* Identificación de Usuario */}
+            <div className="card">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+                    Identificación de Usuario
+                  </h2>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Acerque su tarjeta RFID/NFC para identificarse
+                  </p>
+                </div>
+                <div className="flex items-center space-x-4">
+                  <div className="text-center">
+                    <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-2">
+                      <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">Esperando tarjeta...</div>
+                  </div>
+                  <div className="border-l border-gray-200 dark:border-gray-600 pl-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-gray-600 dark:text-gray-400">Usuario:</span>
+                        <span className="font-medium text-gray-900 dark:text-white">--</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-gray-600 dark:text-gray-400">Asignatura:</span>
+                        <span className="font-medium text-gray-900 dark:text-white">--</span>
+                      </div>
                     </div>
                   </div>
-                  <button
-                    onClick={toggleRecording}
-                    className={`btn-primary ${isRecording ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
-                    disabled={!mqttStatus.connected}
-                  >
-                    {isRecording ? (
-                      <>
-                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-                        </svg>
-                        Detener
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1.586a1 1 0 01.707.293l.707.707A1 1 0 0012.414 11H15m-3 7.5A9.5 9.5 0 1121.5 12 9.5 9.5 0 0112 2.5z" />
-                        </svg>
-                        Iniciar Grabación
-                      </>
-                    )}
-                  </button>
                 </div>
               </div>
             </div>
+
+            {/* Control de Grabación */}
+            <RecordingControl
+              recordingState={recordingState}
+              elapsedTime={recordingDuration}
+              pausedTime={pausedTime}
+              totalRecordingTime={totalRecordingTime}
+              onStart={startRecording}
+              onPause={pauseRecording}
+              onResume={resumeRecording}
+              onStop={stopRecording}
+              onFinish={finishRecording}
+            />
 
             {/* Broker Conectado */}
             <div>
@@ -256,8 +289,11 @@ function App() {
             </div>
           </div>
         </main>
+
+        {/* Componente temporal de debug */}
+        {/* <ThemeDebug /> */}
       </div>
-    </ThemeProvider>
+    </div>
   );
 }
 

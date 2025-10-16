@@ -1,16 +1,7 @@
 // contexts/ThemeContext.tsx
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { ThemeContext } from './themeContext';
 import type { ThemeContextType } from '../types';
-
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
-
-export const useTheme = () => {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error('useTheme must be used within a ThemeProvider');
-  }
-  return context;
-};
 
 interface ThemeProviderProps {
   children: React.ReactNode;
@@ -18,19 +9,23 @@ interface ThemeProviderProps {
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    // Check for saved theme preference or default to 'light'
-    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark';
-    if (savedTheme) {
-      return savedTheme;
-    }
-
-    // Check for system preference
-    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    return systemPrefersDark ? 'dark' : 'light';
+    // Always start with light theme for debugging
+    return 'light';
   });
 
+  // Apply theme immediately when component mounts
   useEffect(() => {
+    console.log('🎨 ThemeProvider mounted - applying initial theme:', theme);
     const root = window.document.documentElement;
+    root.classList.remove('light', 'dark');
+    root.classList.add(theme);
+  }, [theme]); // Include theme dependency
+
+  useEffect(() => {
+    console.log('🎨 ThemeContext useEffect ejecutándose - tema actual:', theme);
+    const root = window.document.documentElement;
+
+    console.log('📋 Clases ANTES:', root.className);
 
     // Remove both classes first
     root.classList.remove('light', 'dark');
@@ -38,8 +33,11 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     // Add the current theme class
     root.classList.add(theme);
 
+    console.log('📋 Clases DESPUÉS:', root.className);
+
     // Save to localStorage
     localStorage.setItem('theme', theme);
+    console.log('💾 Guardado en localStorage:', theme);
 
     // Update meta theme-color for mobile browsers
     const metaThemeColor = document.querySelector('meta[name="theme-color"]');
@@ -49,6 +47,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   }, [theme]);
 
   // Listen for system theme changes
+  // Commented out for debugging
+  /*
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
@@ -63,9 +63,15 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
+  */
 
   const toggleTheme = () => {
-    setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
+    console.log('🔄 toggleTheme llamado - tema actual:', theme);
+    setTheme(prevTheme => {
+      const newTheme = prevTheme === 'light' ? 'dark' : 'light';
+      console.log('➡️ Cambiando tema de', prevTheme, 'a', newTheme);
+      return newTheme;
+    });
   };
 
   const value: ThemeContextType = {

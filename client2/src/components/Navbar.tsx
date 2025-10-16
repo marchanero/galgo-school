@@ -1,4 +1,4 @@
-import { useTheme } from '../contexts/ThemeContext'
+import { useTheme } from '../hooks/useTheme';
 
 const Navbar = () => {
   const { theme, toggleTheme } = useTheme()
@@ -13,9 +13,25 @@ const Navbar = () => {
             </h1>
             <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">Monitor de Sistema</span>
           </div>
-          <div className="flex items-center">
+          
+          {/* Sección de información del usuario */}
+          <div className="flex items-center space-x-6">
+            <div className="hidden md:flex items-center space-x-4 text-sm">
+              <div className="flex items-center space-x-2">
+                <span className="text-gray-600 dark:text-gray-400">Usuario:</span>
+                <span className="font-medium text-gray-900 dark:text-white">--</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <span className="text-gray-600 dark:text-gray-400">Asignatura:</span>
+                <span className="font-medium text-gray-900 dark:text-white">--</span>
+              </div>
+            </div>
+            
             <button
-              onClick={toggleTheme}
+              onClick={() => {
+                console.log('🖱️ Botón de tema clickeado en Navbar');
+                toggleTheme();
+              }}
               className="relative p-2 rounded-lg text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 group"
               title={`Cambiar a modo ${theme === 'light' ? 'oscuro' : 'claro'}`}
               aria-label={`Cambiar a modo ${theme === 'light' ? 'oscuro' : 'claro'}`}
