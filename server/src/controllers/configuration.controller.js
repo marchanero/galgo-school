@@ -404,6 +404,98 @@ class ConfigurationController {
       res.status(500).json({ error: 'Error interno del servidor' });
     }
   }
+
+  // POST /api/configurations/reset - Restaurar configuraciones por defecto
+  async resetConfigurations(req, res) {
+    try {
+      const db = getDatabase();
+
+      db.run('DELETE FROM configurations', [], (err) => {
+        if (err) {
+          console.error('Error deleting configurations:', err);
+          return res.status(500).json({ error: 'Error al restaurar configuraciones' });
+        }
+
+        res.json({ success: true, message: 'Configuraciones restauradas a valores por defecto' });
+      });
+    } catch (error) {
+      console.error('Error resetting configurations:', error);
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  }
+
+  // Validate recording directory
+  validateRecordingDirectory(directory) {
+    const fs = require('fs');
+    const path = require('path');
+
+    // Check if path is absolute
+    if (!path.isAbsolute(directory)) {
+      return { valid: false, error: 'La ruta debe ser absoluta' };
+    }
+
+    // Check if parent directory exists (create if needed)
+    const parentDir = path.dirname(directory);
+    if (!fs.existsSync(parentDir)) {
+      return { valid: false, error: 'El directorio padre no existe' };
+    }
+
+    // Try to create the directory if it doesn't exist
+    try {
+      if (!fs.existsSync(directory)) {
+        fs.mkdirSync(directory, { recursive: true });
+      }
+      return { valid: true, message: 'Directorio válido' };
+    } catch (error) {
+      return { valid: false, error: `No se puede crear el directorio: ${error.message}` };
+    }
+  }
+
+  // POST /api/configurations/validate-recordings - Validar configuración de grabaciones
+  async validateRecordingsConfig(req, res) {
+    try {
+      const { directory, format, maxDuration, quality } = req.body;
+
+      const errors = [];
+
+      // Validate directory
+      if (directory) {
+        const dirValidation = this.validateRecordingDirectory(directory);
+        if (!dirValidation.valid) {
+          errors.push({ field: 'directory', message: dirValidation.error });
+        }
+      }
+
+      // Validate format
+      const validFormats = ['MP4 (H.264)', 'MP4 (H.265)', 'AVI', 'MKV'];
+      if (format && !validFormats.includes(format)) {
+        errors.push({ field: 'format', message: 'Formato de video no soportado' });
+      }
+
+      // Validate maxDuration
+      if (maxDuration) {
+        const duration = parseInt(maxDuration);
+        if (isNaN(duration) || duration < 1 || duration > 3600) {
+          errors.push({ field: 'maxDuration', message: 'Duración debe estar entre 1 y 3600 segundos' });
+        }
+      }
+
+      // Validate quality
+      const validQualities = ['Baja (480p)', 'Media (720p)', 'Alta (1080p)', '4K (2160p)'];
+      if (quality && !validQualities.includes(quality)) {
+        errors.push({ field: 'quality', message: 'Calidad de video no válida' });
+      }
+
+      if (errors.length > 0) {
+        return res.status(400).json({ valid: false, errors });
+      }
+
+      res.json({ valid: true, message: 'Configuración de grabaciones válida' });
+    } catch (error) {
+      console.error('Error validating recordings config:', error);
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  }
 }
 
 module.exports = new ConfigurationController();

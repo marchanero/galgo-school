@@ -64,12 +64,44 @@ function initSensorsDB() {
       )
     `;
 
+    // Create configurations table for system settings
+    const createConfigurationsTable = `
+      CREATE TABLE IF NOT EXISTS configurations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(category, key)
+      )
+    `;
+
+    // Create cameras table for storing camera IPs and configurations
+    const createCamerasTable = `
+      CREATE TABLE IF NOT EXISTS cameras (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        ip TEXT NOT NULL,
+        port INTEGER DEFAULT 554,
+        username TEXT,
+        password TEXT,
+        path TEXT DEFAULT '/stream',
+        active BOOLEAN DEFAULT 1,
+        connection_status TEXT DEFAULT 'disconnected',
+        last_checked DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+
     // Create index for faster queries
     const createIndexes = [
       `CREATE INDEX IF NOT EXISTS idx_sensor_data_sensor_id ON sensor_data (sensor_id)`,
       `CREATE INDEX IF NOT EXISTS idx_sensor_data_timestamp ON sensor_data (timestamp)`,
       `CREATE INDEX IF NOT EXISTS idx_mqtt_topics_topic ON mqtt_topics (topic)`,
-      `CREATE INDEX IF NOT EXISTS idx_sensors_active ON sensors (active)`
+      `CREATE INDEX IF NOT EXISTS idx_sensors_active ON sensors (active)`,
+      `CREATE INDEX IF NOT EXISTS idx_configurations_category ON configurations (category)`,
+      `CREATE INDEX IF NOT EXISTS idx_cameras_active ON cameras (active)`
     ];
 
     // Execute table creation
@@ -100,6 +132,24 @@ function initSensorsDB() {
           return;
         }
         console.log('✅ Sensor Data table created/verified');
+      });
+
+      db.run(createConfigurationsTable, (err) => {
+        if (err) {
+          console.error('Error creating configurations table:', err);
+          reject(err);
+          return;
+        }
+        console.log('✅ Configurations table created/verified');
+      });
+
+      db.run(createCamerasTable, (err) => {
+        if (err) {
+          console.error('Error creating cameras table:', err);
+          reject(err);
+          return;
+        }
+        console.log('✅ Cameras table created/verified');
       });
 
     // Create indexes

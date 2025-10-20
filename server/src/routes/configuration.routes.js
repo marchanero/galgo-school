@@ -324,4 +324,53 @@ router.put('/sync-sensors', configurationController.syncSensorsFromConfig);
  */
 router.put('/sync-topics', configurationController.syncTopicsFromConfig);
 
+/**
+ * @swagger
+ * /api/configurations/reset:
+ *   post:
+ *     summary: Restaurar todas las configuraciones a valores por defecto
+ *     tags: [Configurations]
+ *     responses:
+ *       200:
+ *         description: Configuraciones restauradas exitosamente
+ *       500:
+ *         description: Error interno del servidor
+ */
+router.post('/reset', configurationController.resetConfigurations);
+
+/**
+ * @swagger
+ * /api/configurations/validate-recordings:
+ *   post:
+ *     summary: Validar configuración de grabaciones
+ *     tags: [Configurations]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               directory:
+ *                 type: string
+ *                 example: /home/roberto/galgo-recordings
+ *               format:
+ *                 type: string
+ *                 example: MP4 (H.264)
+ *               maxDuration:
+ *                 type: number
+ *                 example: 60
+ *               quality:
+ *                 type: string
+ *                 example: Alta (1080p)
+ *     responses:
+ *       200:
+ *         description: Configuración válida
+ *       400:
+ *         description: Configuración inválida
+ *       500:
+ *         description: Error interno del servidor
+ */
+router.post('/validate-recordings', configurationController.validateRecordingsConfig);
+
 module.exports = router;

@@ -19,25 +19,36 @@ module.exports = {
         return callback(null, true);
       }
       
-      const allowedOrigins = [
-        'http://localhost:5173',
-        'http://127.0.0.1:5173',
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        'http://192.168.1.107:5173'
-      ];
+      // Extract host and port from origin
+      const url = new URL(origin);
+      const hostname = url.hostname;
+      const port = url.port || (url.protocol === 'https:' ? 443 : 80);
       
-      if (allowedOrigins.indexOf(origin) !== -1) {
-        console.log('✅ CORS - Origin allowed:', origin);
-        callback(null, true);
-      } else {
-        console.log('❌ CORS - Origin NOT allowed:', origin);
-        console.log('❌ CORS - Allowed origins:', allowedOrigins);
-        // Temporalmente permitir todos los orígenes para debugging
-        console.log('⚠️ CORS - Permitiendo temporalmente para debugging');
-        callback(null, true);
-        // callback(new Error('Not allowed by CORS'));
+      // Allow localhost and 127.0.0.1 with any dev port (5173, 5174, 5175, 3000, 3001)
+      const devPorts = ['5173', '5174', '5175', '5176', '3000', '3001'];
+      const isDevPort = devPorts.includes(port);
+      
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+        if (isDevPort) {
+          console.log('✅ CORS - Localhost/127.0.0.1 allowed on dev port:', origin);
+          return callback(null, true);
+        }
       }
+      
+      // Allow any local IP (192.168.x.x, 100.x.x.x, etc.) on dev ports
+      if (isDevPort && !hostname.startsWith('external') && !origin.includes('http://')) {
+        console.log('✅ CORS - Local IP allowed on dev port:', origin);
+        return callback(null, true);
+      }
+      
+      // More permissive: allow any origin on dev ports in development
+      if (process.env.NODE_ENV !== 'production' && isDevPort) {
+        console.log('✅ CORS - Dev environment: allowing all origins on dev ports:', origin);
+        return callback(null, true);
+      }
+      
+      console.log('❌ CORS - Origin NOT allowed:', origin);
+      callback(null, true); // Still allow for debugging, remove in production
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
