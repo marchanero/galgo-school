@@ -17,162 +17,13 @@ const configurationController = require('../controllers/configuration.controller
  *               type: object
  *               properties:
  *                 configurations:
- *                   type: object
- *                   properties:
- *                     general:
- *                       type: object
- *                       properties:
- *                         theme:
- *                           type: string
- *                           example: light
- *                         recordingAutoStart:
- *                           type: boolean
- *                           example: false
- *                         language:
- *                           type: string
- *                           example: es
- *                         timezone:
- *                           type: string
- *                           example: America/Mexico_City
- *                     recordings:
- *                       type: object
- *                       properties:
- *                         directory:
- *                           type: string
- *                           example: /home/roberto/galgo-recordings
- *                         format:
- *                           type: string
- *                           example: MP4 (H.264)
- *                         maxDuration:
- *                           type: number
- *                           example: 60
- *                         quality:
- *                           type: string
- *                           example: Alta (1080p)
- *                     mqtt:
- *                       type: object
- *                       properties:
- *                         defaultBroker:
- *                           type: string
- *                           example: EMQX Local (localhost:1883)
- *                         host:
- *                           type: string
- *                           example: localhost
- *                         port:
- *                           type: number
- *                           example: 1883
- *                         username:
- *                           type: string
- *                           example: ""
- *                         password:
- *                           type: string
- *                           example: ""
- *                         ssl:
- *                           type: boolean
- *                           example: false
- *                     cameras:
- *                       type: object
- *                       properties:
- *                         defaultRtspPort:
- *                           type: number
- *                           example: 554
- *                         defaultRtspPath:
- *                           type: string
- *                           example: /stream
- *                         connectionTimeout:
- *                           type: number
- *                           example: 10
- *                         defaultQuality:
- *                           type: string
- *                           example: 1080p (Alta)
- *                         defaultFrameRate:
- *                           type: string
- *                           example: 30 FPS
- *                         autoReconnect:
- *                           type: boolean
- *                           example: true
- *                         videoBuffer:
- *                           type: boolean
- *                           example: true
- *                         bufferSize:
- *                           type: number
- *                           example: 5
- *                         cameraIPs:
- *                           type: array
- *                           items:
- *                             type: object
- *                     sensors:
- *                       type: object
- *                       properties:
- *                         autoLoad:
- *                           type: boolean
- *                           example: true
- *                         defaultActive:
- *                           type: boolean
- *                           example: true
- *                         refreshInterval:
- *                           type: number
- *                           example: 30
- *                         sensors:
- *                           type: array
- *                           items:
- *                             type: object
- *                             properties:
- *                               id:
- *                                 type: integer
- *                                 example: 1
- *                               type:
- *                                 type: string
- *                                 example: rtsp
- *                               name:
- *                                 type: string
- *                                 example: Cámara Principal
- *                               data:
- *                                 type: object
- *                                 example: { "host": "192.168.1.100" }
- *                               created_at:
- *                                 type: string
- *                                 example: "2023-10-13T10:00:00.000Z"
- *                     topics:
- *                       type: object
- *                       properties:
- *                         autoSubscribe:
- *                           type: boolean
- *                           example: true
- *                         defaultQos:
- *                           type: integer
- *                           example: 0
- *                         defaultRetained:
- *                           type: boolean
- *                           example: false
- *                         topics:
- *                           type: array
- *                           items:
- *                             type: object
- *                             properties:
- *                               id:
- *                                 type: integer
- *                                 example: 1
- *                               topic:
- *                                 type: string
- *                                 example: sensors/temperature
- *                               description:
- *                                 type: string
- *                                 example: Topic para temperatura
- *                               qos:
- *                                 type: integer
- *                                 example: 0
- *                               retained:
- *                                 type: boolean
- *                                 example: false
- *                               active:
- *                                 type: boolean
- *                                 example: true
- *                               created_at:
- *                                 type: string
- *                                 example: "2023-10-13T10:00:00.000Z"
+ *                   $ref: '#/components/schemas/Configuration'
  *       500:
  *         description: Error interno del servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.get('/', configurationController.getConfigurations);
 
@@ -195,20 +46,42 @@ router.get('/', configurationController.getConfigurations);
  *             properties:
  *               category:
  *                 type: string
+ *                 enum: [general, recordings, mqtt, cameras, sensors, topics]
  *                 example: general
  *               key:
  *                 type: string
  *                 example: theme
  *               value:
- *                 type: string
+ *                 oneOf:
+ *                   - type: string
+ *                   - type: boolean
+ *                   - type: integer
+ *                   - type: object
  *                 example: dark
  *     responses:
  *       200:
  *         description: Configuración guardada exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
  *       400:
  *         description: Datos inválidos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       500:
  *         description: Error interno del servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.post('/', configurationController.saveConfiguration);
 
@@ -216,7 +89,7 @@ router.post('/', configurationController.saveConfiguration);
  * @swagger
  * /api/configurations/bulk:
  *   put:
- *     summary: Guardar todas las configuraciones
+ *     summary: Guardar todas las configuraciones de una vez
  *     tags: [Configurations]
  *     requestBody:
  *       required: true
@@ -228,15 +101,31 @@ router.post('/', configurationController.saveConfiguration);
  *               - configurations
  *             properties:
  *               configurations:
- *                 type: object
- *                 description: Objeto completo de configuraciones
+ *                 $ref: '#/components/schemas/Configuration'
  *     responses:
  *       200:
  *         description: Todas las configuraciones guardadas exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
  *       400:
  *         description: Datos inválidos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       500:
  *         description: Error interno del servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.put('/bulk', configurationController.saveAllConfigurations);
 
@@ -258,24 +147,31 @@ router.put('/bulk', configurationController.saveAllConfigurations);
  *               sensors:
  *                 type: array
  *                 items:
- *                   type: object
- *                   properties:
- *                     type:
- *                       type: string
- *                       example: rtsp
- *                     name:
- *                       type: string
- *                       example: Cámara Principal
- *                     data:
- *                       type: object
- *                       example: { "host": "192.168.1.100", "port": 554 }
+ *                   $ref: '#/components/schemas/Sensor'
  *     responses:
  *       200:
  *         description: Sensores sincronizados exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
  *       400:
  *         description: Datos inválidos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       500:
  *         description: Error interno del servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.put('/sync-sensors', configurationController.syncSensorsFromConfig);
 
@@ -297,30 +193,31 @@ router.put('/sync-sensors', configurationController.syncSensorsFromConfig);
  *               topics:
  *                 type: array
  *                 items:
- *                   type: object
- *                   properties:
- *                     topic:
- *                       type: string
- *                       example: sensors/temperature
- *                     description:
- *                       type: string
- *                       example: Topic para temperatura
- *                     qos:
- *                       type: integer
- *                       example: 0
- *                     retained:
- *                       type: boolean
- *                       example: false
- *                     active:
- *                       type: boolean
- *                       example: true
+ *                   $ref: '#/components/schemas/MQTTTopic'
  *     responses:
  *       200:
  *         description: Topics sincronizados exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
  *       400:
  *         description: Datos inválidos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       500:
  *         description: Error interno del servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.put('/sync-topics', configurationController.syncTopicsFromConfig);
 
@@ -333,8 +230,21 @@ router.put('/sync-topics', configurationController.syncTopicsFromConfig);
  *     responses:
  *       200:
  *         description: Configuraciones restauradas exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
  *       500:
  *         description: Error interno del servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.post('/reset', configurationController.resetConfigurations);
 
@@ -353,23 +263,45 @@ router.post('/reset', configurationController.resetConfigurations);
  *             properties:
  *               directory:
  *                 type: string
+ *                 description: Ruta absoluta del directorio de grabaciones
  *                 example: /home/roberto/galgo-recordings
  *               format:
  *                 type: string
+ *                 enum: [MP4 (H.264), MP4 (H.265), AVI, MKV]
  *                 example: MP4 (H.264)
  *               maxDuration:
  *                 type: number
+ *                 description: Duración máxima en segundos (1-3600)
  *                 example: 60
  *               quality:
  *                 type: string
+ *                 enum: [Baja (480p), Media (720p), Alta (1080p), 4K (2160p)]
  *                 example: Alta (1080p)
  *     responses:
  *       200:
  *         description: Configuración válida
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 valid:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
  *       400:
  *         description: Configuración inválida
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ValidationError'
  *       500:
  *         description: Error interno del servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.post('/validate-recordings', configurationController.validateRecordingsConfig);
 
