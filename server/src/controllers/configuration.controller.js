@@ -12,7 +12,7 @@ class ConfigurationController {
           theme: 'light',
           recordingAutoStart: false,
           language: 'es',
-          timezone: 'America/Mexico_City'
+          timezone: 'America/Mexico_City'  // Zona horaria por defecto: México
         },
         recordings: {
           directory: '/home/roberto/galgo-recordings',

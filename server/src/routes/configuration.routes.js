@@ -87,6 +87,50 @@ router.post('/', configurationController.saveConfiguration);
 
 /**
  * @swagger
+ * /api/configurations:
+ *   put:
+ *     summary: Guardar todas las configuraciones (PUT alternativo a /bulk)
+ *     tags: [Configurations]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - configurations
+ *             properties:
+ *               configurations:
+ *                 $ref: '#/components/schemas/Configuration'
+ *     responses:
+ *       200:
+ *         description: Todas las configuraciones guardadas exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       400:
+ *         description: Datos inválidos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Error interno del servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.put('/', configurationController.saveAllConfigurations);
+
+/**
+ * @swagger
  * /api/configurations/bulk:
  *   put:
  *     summary: Guardar todas las configuraciones de una vez
