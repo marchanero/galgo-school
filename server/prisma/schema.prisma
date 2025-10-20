@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model configurations {
+  id         Int       @id @default(autoincrement())
+  category   String
+  key        String
+  value      String?
+  updated_at DateTime? @default(now())
+
+  @@unique([category, key], map: "sqlite_autoindex_configurations_1")
+}
+
+model mqtt_messages {
+  id        Int       @id @default(autoincrement())
+  topic     String
+  message   String?
+  qos       Int?
+  retain    Boolean?
+  timestamp DateTime? @default(now())
+}
+
+model mqtt_topics {
+  id          Int       @id @default(autoincrement())
+  topic       String    @unique(map: "sqlite_autoindex_mqtt_topics_1")
+  description String?
+  qos         Int?      @default(0)
+  retained    Boolean?  @default(false)
+  active      Boolean?  @default(true)
+  created_at  DateTime? @default(now())
+  updated_at  DateTime? @default(now())
+
+  @@index([topic], map: "idx_mqtt_topics_topic")
+}
+
+model sensor_data {
+  id            Int       @id @default(autoincrement())
+  sensor_id     Int
+  topic         String
+  value         String
+  numeric_value Float?
+  timestamp     DateTime? @default(now())
+  raw_message   String?
+  sensors       sensors   @relation(fields: [sensor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([timestamp], map: "idx_sensor_data_timestamp")
+  @@index([sensor_id], map: "idx_sensor_data_sensor_id")
+}
+
+model sensors {
+  id          Int           @id @default(autoincrement())
+  type        String
+  name        String
+  data        String?
+  topic       String        @default("")
+  description String?
+  unit        String?
+  min_value   Float?
+  max_value   Float?
+  active      Boolean?      @default(true)
+  updated_at  DateTime?     @default(now())
+  created_at  DateTime?
+  sensor_data sensor_data[]
+}
+
+model cameras {
+  id                Int       @id @default(autoincrement())
+  name              String    @unique
+  ip                String
+  port              Int       @default(554)
+  username          String    @default("")
+  password          String    @default("")
+  path              String    @default("/stream")
+  active            Boolean   @default(true)
+  connection_status String    @default("disconnected")
+  last_checked      DateTime?
+  created_at        DateTime? @default(now())
+  updated_at        DateTime? @default(now())
+}

@@ -1,18 +1,16 @@
-const { getDatabase } = require('../config/database');
+const prisma = require('../lib/prisma');
 
 class ConfigurationController {
   // GET /api/configurations - Obtener todas las configuraciones
   async getConfigurations(req, res) {
     try {
-      const db = getDatabase();
-
       // Configuraciones por defecto
       const defaultConfigs = {
         general: {
           theme: 'light',
           recordingAutoStart: false,
           language: 'es',
-          timezone: 'America/Mexico_City'  // Zona horaria por defecto: México
+          timezone: 'Europe/Madrid'  // Zona horaria por defecto: México
         },
         recordings: {
           directory: '/home/roberto/galgo-recordings',
@@ -53,86 +51,76 @@ class ConfigurationController {
         }
       };
 
-      // Obtener todas las configuraciones de la base de datos
-      db.all('SELECT category, key, value FROM configurations', [], (err, rows) => {
-        let configurations = { ...defaultConfigs };
+      // Obtener todas las configuraciones de la base de datos usando Prisma
+      const savedConfigRows = await prisma.configurations.findMany();
+      
+      let configurations = { ...defaultConfigs };
 
-        if (!err && rows) {
-          // Group configurations by category
-          const savedConfigs = {};
-          rows.forEach(row => {
-            if (!savedConfigs[row.category]) {
-              savedConfigs[row.category] = {};
-            }
+      if (savedConfigRows && savedConfigRows.length > 0) {
+        // Group configurations by category
+        const savedConfigs = {};
+        savedConfigRows.forEach(row => {
+          if (!savedConfigs[row.category]) {
+            savedConfigs[row.category] = {};
+          }
 
-            // Parse value if it's JSON, otherwise keep as string
-            let parsedValue = row.value;
-            try {
-              parsedValue = JSON.parse(row.value);
-            } catch (e) {
-              // Keep as string if not JSON
-            }
+          // Parse value if it's JSON, otherwise keep as string
+          let parsedValue = row.value;
+          try {
+            parsedValue = JSON.parse(row.value);
+          } catch (e) {
+            // Keep as string if not JSON
+          }
 
-            savedConfigs[row.category][row.key] = parsedValue;
-          });
-
-          // Merge saved configurations with defaults
-          configurations = {
-            general: { ...defaultConfigs.general, ...savedConfigs.general },
-            recordings: { ...defaultConfigs.recordings, ...savedConfigs.recordings },
-            mqtt: { ...defaultConfigs.mqtt, ...savedConfigs.mqtt },
-            cameras: { ...defaultConfigs.cameras, ...savedConfigs.cameras },
-            sensors: { ...defaultConfigs.sensors, ...savedConfigs.sensors },
-            topics: { ...defaultConfigs.topics, ...savedConfigs.topics }
-          };
-        }
-
-        // Load current sensors and topics from database
-        Promise.all([
-          new Promise((resolve, reject) => {
-            db.all('SELECT id, type, name, topic, description, unit, min_value, max_value, active, created_at FROM sensors ORDER BY created_at DESC', [], (err, sensorRows) => {
-              if (err) reject(err);
-              else resolve(sensorRows);
-            });
-          }),
-          new Promise((resolve, reject) => {
-            db.all('SELECT id, topic, description, qos, retained, active, created_at FROM mqtt_topics ORDER BY created_at DESC', [], (err, topicRows) => {
-              if (err) reject(err);
-              else resolve(topicRows);
-            });
-          })
-        ]).then(([sensors, topics]) => {
-          // Update configurations with current database state
-          configurations.sensors.sensors = sensors.map(sensor => ({
-            id: sensor.id,
-            type: sensor.type,
-            name: sensor.name,
-            topic: sensor.topic,
-            description: sensor.description,
-            unit: sensor.unit,
-            min_value: sensor.min_value,
-            max_value: sensor.max_value,
-            active: sensor.active,
-            created_at: sensor.created_at
-          }));
-
-          configurations.topics.topics = topics.map(topic => ({
-            id: topic.id,
-            topic: topic.topic,
-            description: topic.description,
-            qos: topic.qos,
-            retained: topic.retained,
-            active: topic.active,
-            created_at: topic.created_at
-          }));
-
-          res.json({ configurations });
-        }).catch(error => {
-          console.error('Error loading sensors/topics:', error);
-          // Return configurations without current database state
-          res.json({ configurations });
+          savedConfigs[row.category][row.key] = parsedValue;
         });
+
+        // Merge saved configurations with defaults
+        configurations = {
+          general: { ...defaultConfigs.general, ...savedConfigs.general },
+          recordings: { ...defaultConfigs.recordings, ...savedConfigs.recordings },
+          mqtt: { ...defaultConfigs.mqtt, ...savedConfigs.mqtt },
+          cameras: { ...defaultConfigs.cameras, ...savedConfigs.cameras },
+          sensors: { ...defaultConfigs.sensors, ...savedConfigs.sensors },
+          topics: { ...defaultConfigs.topics, ...savedConfigs.topics }
+        };
+      }
+
+      // Load current sensors and topics from database using Prisma
+      const sensors = await prisma.sensors.findMany({
+        orderBy: { created_at: 'desc' },
+        include: { sensor_data: { take: 0 } }
       });
+
+      const topics = await prisma.mqtt_topics.findMany({
+        orderBy: { created_at: 'desc' }
+      });
+
+      // Update configurations with current database state
+      configurations.sensors.sensors = sensors.map(sensor => ({
+        id: sensor.id,
+        type: sensor.type,
+        name: sensor.name,
+        topic: sensor.topic,
+        description: sensor.description,
+        unit: sensor.unit,
+        min_value: sensor.min_value,
+        max_value: sensor.max_value,
+        active: sensor.active,
+        created_at: sensor.created_at
+      }));
+
+      configurations.topics.topics = topics.map(topic => ({
+        id: topic.id,
+        topic: topic.topic,
+        description: topic.description,
+        qos: topic.qos,
+        retained: topic.retained,
+        active: topic.active,
+        created_at: topic.created_at
+      }));
+
+      res.json({ configurations });
     } catch (error) {
       console.error('Error getting configurations:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
@@ -148,23 +136,38 @@ class ConfigurationController {
         return res.status(400).json({ error: 'Categoría y clave son requeridas' });
       }
 
-      const db = getDatabase();
-
       // Convert value to string (JSON if object/array)
       const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
 
-      db.run(
-        'INSERT OR REPLACE INTO configurations (category, key, value, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)',
-        [category, key, valueStr],
-        function(err) {
-          if (err) {
-            console.error('Error saving configuration:', err);
-            return res.status(500).json({ error: 'Error al guardar configuración' });
-          }
-
-          res.json({ success: true, message: 'Configuración guardada exitosamente' });
+      // First try to find existing configuration
+      const existing = await prisma.configurations.findFirst({
+        where: {
+          category,
+          key
         }
-      );
+      });
+
+      if (existing) {
+        // Update existing
+        await prisma.configurations.update({
+          where: { id: existing.id },
+          data: {
+            value: valueStr,
+            updated_at: new Date()
+          }
+        });
+      } else {
+        // Create new
+        await prisma.configurations.create({
+          data: {
+            category,
+            key,
+            value: valueStr
+          }
+        });
+      }
+
+      res.json({ success: true, message: 'Configuración guardada exitosamente' });
     } catch (error) {
       console.error('Error saving configuration:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
@@ -180,88 +183,73 @@ class ConfigurationController {
         return res.status(400).json({ error: 'Configuraciones son requeridas' });
       }
 
-      const db = getDatabase();
-      const statements = [];
-      const params = [];
+      const upsertPromises = [];
+
+      // Helper function to upsert a configuration
+      const upsertConfig = async (category, key, value) => {
+        const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
+        
+        const existing = await prisma.configurations.findFirst({
+          where: { category, key }
+        });
+
+        if (existing) {
+          return prisma.configurations.update({
+            where: { id: existing.id },
+            data: { value: valueStr, updated_at: new Date() }
+          });
+        } else {
+          return prisma.configurations.create({
+            data: { category, key, value: valueStr }
+          });
+        }
+      };
 
       // Handle sensors synchronization
       if (configurations.sensors && configurations.sensors.sensors) {
-        // This will be handled by separate sensor management endpoints
-        // For now, we'll just save the sensor settings (not the sensor list itself)
         const sensorSettings = { ...configurations.sensors };
-        delete sensorSettings.sensors; // Remove the sensors array from config
+        delete sensorSettings.sensors;
 
         Object.entries(sensorSettings).forEach(([key, value]) => {
-          const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
-          statements.push('INSERT OR REPLACE INTO configurations (category, key, value, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)');
-          params.push('sensors', key, valueStr);
+          upsertPromises.push(upsertConfig('sensors', key, value));
         });
       }
 
       // Handle topics synchronization
       if (configurations.topics && configurations.topics.topics) {
-        // This will be handled by separate topic management endpoints
-        // For now, we'll just save the topic settings (not the topic list itself)
         const topicSettings = { ...configurations.topics };
-        delete topicSettings.topics; // Remove the topics array from config
+        delete topicSettings.topics;
 
         Object.entries(topicSettings).forEach(([key, value]) => {
-          const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
-          statements.push('INSERT OR REPLACE INTO configurations (category, key, value, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)');
-          params.push('topics', key, valueStr);
+          upsertPromises.push(upsertConfig('topics', key, value));
         });
       }
 
-      // Build bulk update statements for other configurations
+      // Build upsert statements for other configurations
       Object.entries(configurations).forEach(([category, categoryConfigs]) => {
         if (category === 'sensors' || category === 'topics') {
-          // Skip sensors and topics as they're handled separately above
           return;
         }
 
         Object.entries(categoryConfigs).forEach(([key, value]) => {
-          const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
-          statements.push('INSERT OR REPLACE INTO configurations (category, key, value, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)');
-          params.push(category, key, valueStr);
+          upsertPromises.push(upsertConfig(category, key, value));
         });
       });
 
-      if (statements.length === 0) {
+      if (upsertPromises.length === 0) {
         return res.status(400).json({ error: 'No configurations to update' });
       }
 
-      // Execute all statements in a transaction
-      db.serialize(() => {
-        db.run('BEGIN TRANSACTION');
+      // Execute all upserts in parallel
+      await Promise.all(upsertPromises);
 
-        let completed = 0;
-        let hasError = false;
-
-        statements.forEach((stmt, index) => {
-          db.run(stmt, params.slice(index * 3, (index + 1) * 3), (err) => {
-            if (err && !hasError) {
-              hasError = true;
-              db.run('ROLLBACK');
-              return res.status(500).json({ error: err.message });
-            }
-
-            completed++;
-            if (completed === statements.length && !hasError) {
-              db.run('COMMIT', (err) => {
-                if (err) {
-                  return res.status(500).json({ error: err.message });
-                }
-                res.json({ success: true, message: 'Todas las configuraciones guardadas exitosamente' });
-              });
-            }
-          });
-        });
-      });
+      res.json({ success: true, message: 'Todas las configuraciones guardadas exitosamente' });
     } catch (error) {
       console.error('Error saving all configurations:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
     }
   }
+
   // PUT /api/configurations/sync-sensors - Sincronizar sensores desde configuraciones
   async syncSensorsFromConfig(req, res) {
     try {
@@ -271,67 +259,29 @@ class ConfigurationController {
         return res.status(400).json({ error: 'Sensores debe ser un array' });
       }
 
-      const db = getDatabase();
-
-      // Clear existing sensors and insert new ones
-      db.serialize(() => {
-        db.run('BEGIN TRANSACTION');
-
+      // Use Prisma transaction to delete all and insert new sensors
+      await prisma.$transaction(async (tx) => {
         // Delete all existing sensors
-        db.run('DELETE FROM sensors', [], (err) => {
-          if (err) {
-            db.run('ROLLBACK');
-            return res.status(500).json({ error: err.message });
-          }
+        await tx.sensors.deleteMany();
 
-          // Insert new sensors
-          let completed = 0;
-          let hasError = false;
-
-          if (sensors.length === 0) {
-            db.run('COMMIT', (err) => {
-              if (err) {
-                return res.status(500).json({ error: err.message });
-              }
-              res.json({ success: true, message: 'Sensores sincronizados exitosamente' });
-            });
-            return;
-          }
-
-          sensors.forEach(sensor => {
-            db.run(
-              'INSERT INTO sensors (type, name, topic, description, unit, min_value, max_value, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-              [
-                sensor.type,
-                sensor.name,
-                sensor.topic || '',
-                sensor.description || '',
-                sensor.unit || '',
-                sensor.min_value || null,
-                sensor.max_value || null,
-                sensor.active !== false
-              ],
-              function(err) {
-                if (err && !hasError) {
-                  hasError = true;
-                  db.run('ROLLBACK');
-                  return res.status(500).json({ error: err.message });
-                }
-
-                completed++;
-                if (completed === sensors.length && !hasError) {
-                  db.run('COMMIT', (err) => {
-                    if (err) {
-                      return res.status(500).json({ error: err.message });
-                    }
-                    res.json({ success: true, message: 'Sensores sincronizados exitosamente' });
-                  });
-                }
-              }
-            );
+        // Insert new sensors if array is not empty
+        if (sensors.length > 0) {
+          await tx.sensors.createMany({
+            data: sensors.map(sensor => ({
+              type: sensor.type,
+              name: sensor.name,
+              topic: sensor.topic || '',
+              description: sensor.description || '',
+              unit: sensor.unit || '',
+              min_value: sensor.min_value || null,
+              max_value: sensor.max_value || null,
+              active: sensor.active !== false
+            }))
           });
-        });
+        }
       });
+
+      res.json({ success: true, message: 'Sensores sincronizados exitosamente' });
     } catch (error) {
       console.error('Error syncing sensors:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
@@ -347,58 +297,26 @@ class ConfigurationController {
         return res.status(400).json({ error: 'Topics debe ser un array' });
       }
 
-      const db = getDatabase();
-
-      // Clear existing topics and insert new ones
-      db.serialize(() => {
-        db.run('BEGIN TRANSACTION');
-
+      // Use Prisma transaction to delete all and insert new topics
+      await prisma.$transaction(async (tx) => {
         // Delete all existing topics
-        db.run('DELETE FROM mqtt_topics', [], (err) => {
-          if (err) {
-            db.run('ROLLBACK');
-            return res.status(500).json({ error: err.message });
-          }
+        await tx.mqtt_topics.deleteMany();
 
-          // Insert new topics
-          let completed = 0;
-          let hasError = false;
-
-          if (topics.length === 0) {
-            db.run('COMMIT', (err) => {
-              if (err) {
-                return res.status(500).json({ error: err.message });
-              }
-              res.json({ success: true, message: 'Topics sincronizados exitosamente' });
-            });
-            return;
-          }
-
-          topics.forEach(topic => {
-            db.run(
-              'INSERT INTO mqtt_topics (topic, description, qos, retained, active) VALUES (?, ?, ?, ?, ?)',
-              [topic.topic, topic.description || '', topic.qos || 0, topic.retained || false, topic.active !== false],
-              function(err) {
-                if (err && !hasError) {
-                  hasError = true;
-                  db.run('ROLLBACK');
-                  return res.status(500).json({ error: err.message });
-                }
-
-                completed++;
-                if (completed === topics.length && !hasError) {
-                  db.run('COMMIT', (err) => {
-                    if (err) {
-                      return res.status(500).json({ error: err.message });
-                    }
-                    res.json({ success: true, message: 'Topics sincronizados exitosamente' });
-                  });
-                }
-              }
-            );
+        // Insert new topics if array is not empty
+        if (topics.length > 0) {
+          await tx.mqtt_topics.createMany({
+            data: topics.map(topic => ({
+              topic: topic.topic,
+              description: topic.description || '',
+              qos: topic.qos || 0,
+              retained: topic.retained || false,
+              active: topic.active !== false
+            }))
           });
-        });
+        }
       });
+
+      res.json({ success: true, message: 'Topics sincronizados exitosamente' });
     } catch (error) {
       console.error('Error syncing topics:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
@@ -408,16 +326,8 @@ class ConfigurationController {
   // POST /api/configurations/reset - Restaurar configuraciones por defecto
   async resetConfigurations(req, res) {
     try {
-      const db = getDatabase();
-
-      db.run('DELETE FROM configurations', [], (err) => {
-        if (err) {
-          console.error('Error deleting configurations:', err);
-          return res.status(500).json({ error: 'Error al restaurar configuraciones' });
-        }
-
-        res.json({ success: true, message: 'Configuraciones restauradas a valores por defecto' });
-      });
+      await prisma.configurations.deleteMany();
+      res.json({ success: true, message: 'Configuraciones restauradas a valores por defecto' });
     } catch (error) {
       console.error('Error resetting configurations:', error);
       res.status(500).json({ error: 'Error interno del servidor' });

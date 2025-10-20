@@ -1,4 +1,4 @@
-const { getDatabase } = require('../config/database');
+const prisma = require('../lib/prisma');
 
 class CameraController {
   /**
@@ -6,38 +6,27 @@ class CameraController {
    */
   async getAllCameras(req, res) {
     try {
-      const db = getDatabase();
-
-      db.all(
-        'SELECT id, name, ip, port, username, password, path, active, connection_status, last_checked, created_at, updated_at FROM cameras ORDER BY created_at DESC',
-        [],
-        (err, rows) => {
-          if (err) {
-            console.error('Error fetching cameras:', err);
-            return res.status(500).json({ error: 'Error al obtener cámaras' });
-          }
-
-          // Don't return passwords in the response
-          const cameras = rows.map(camera => ({
-            id: camera.id,
-            name: camera.name,
-            ip: camera.ip,
-            port: camera.port,
-            username: camera.username,
-            path: camera.path,
-            active: camera.active === 1,
-            connection_status: camera.connection_status,
-            last_checked: camera.last_checked,
-            created_at: camera.created_at,
-            updated_at: camera.updated_at
-          }));
-
-          res.json({ cameras, count: cameras.length });
+      const cameras = await prisma.cameras.findMany({
+        orderBy: { created_at: 'desc' },
+        select: {
+          id: true,
+          name: true,
+          ip: true,
+          port: true,
+          username: true,
+          path: true,
+          active: true,
+          connection_status: true,
+          last_checked: true,
+          created_at: true,
+          updated_at: true
         }
-      );
+      });
+
+      res.json({ cameras, count: cameras.length });
     } catch (error) {
       console.error('Error fetching cameras:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      res.status(500).json({ error: 'Error al obtener cámaras' });
     }
   }
 
@@ -47,27 +36,31 @@ class CameraController {
   async getCamera(req, res) {
     try {
       const { id } = req.params;
-      const db = getDatabase();
-
-      db.get(
-        'SELECT id, name, ip, port, username, path, active, connection_status, last_checked, created_at, updated_at FROM cameras WHERE id = ?',
-        [id],
-        (err, row) => {
-          if (err) {
-            console.error('Error fetching camera:', err);
-            return res.status(500).json({ error: 'Error al obtener cámara' });
-          }
-
-          if (!row) {
-            return res.status(404).json({ error: 'Cámara no encontrada' });
-          }
-
-          res.json({ camera: row });
+      const camera = await prisma.cameras.findUnique({
+        where: { id: parseInt(id) },
+        select: {
+          id: true,
+          name: true,
+          ip: true,
+          port: true,
+          username: true,
+          path: true,
+          active: true,
+          connection_status: true,
+          last_checked: true,
+          created_at: true,
+          updated_at: true
         }
-      );
+      });
+
+      if (!camera) {
+        return res.status(404).json({ error: 'Cámara no encontrada' });
+      }
+
+      res.json({ camera });
     } catch (error) {
       console.error('Error fetching camera:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      res.status(500).json({ error: 'Error al obtener cámara' });
     }
   }
 
@@ -94,36 +87,31 @@ class CameraController {
         return res.status(400).json({ error: 'Puerto debe estar entre 1 y 65535' });
       }
 
-      const db = getDatabase();
-
-      db.run(
-        'INSERT INTO cameras (name, ip, port, username, password, path, active) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [name, ip, parsedPort, username, password, path, 1],
-        function(err) {
-          if (err) {
-            if (err.message.includes('UNIQUE constraint failed')) {
-              return res.status(409).json({ error: 'Ya existe una cámara con ese nombre' });
-            }
-            console.error('Error creating camera:', err);
-            return res.status(500).json({ error: 'Error al crear cámara' });
+      try {
+        const camera = await prisma.cameras.create({
+          data: {
+            name,
+            ip,
+            port: parsedPort,
+            username,
+            password,
+            path,
+            active: true,
+            connection_status: 'disconnected'
           }
+        });
 
-          res.status(201).json({
-            success: true,
-            message: 'Cámara creada exitosamente',
-            camera: {
-              id: this.lastID,
-              name,
-              ip,
-              port: parsedPort,
-              username,
-              path,
-              active: true,
-              connection_status: 'disconnected'
-            }
-          });
+        res.status(201).json({
+          success: true,
+          message: 'Cámara creada exitosamente',
+          camera
+        });
+      } catch (error) {
+        if (error.code === 'P2002') {
+          return res.status(409).json({ error: 'Ya existe una cámara con ese nombre' });
         }
-      );
+        throw error;
+      }
     } catch (error) {
       console.error('Error creating camera:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
@@ -151,67 +139,37 @@ class CameraController {
         }
       }
 
-      const db = getDatabase();
+      // Build update data
+      const updateData = {};
+      if (name !== undefined) updateData.name = name;
+      if (ip !== undefined) updateData.ip = ip;
+      if (port !== undefined) updateData.port = parseInt(port);
+      if (username !== undefined) updateData.username = username;
+      if (password !== undefined) updateData.password = password;
+      if (path !== undefined) updateData.path = path;
+      if (active !== undefined) updateData.active = active;
+      updateData.updated_at = new Date();
 
-      // Build dynamic update query
-      const updates = [];
-      const params = [];
-
-      if (name !== undefined) {
-        updates.push('name = ?');
-        params.push(name);
-      }
-      if (ip !== undefined) {
-        updates.push('ip = ?');
-        params.push(ip);
-      }
-      if (port !== undefined) {
-        updates.push('port = ?');
-        params.push(parseInt(port));
-      }
-      if (username !== undefined) {
-        updates.push('username = ?');
-        params.push(username);
-      }
-      if (password !== undefined) {
-        updates.push('password = ?');
-        params.push(password);
-      }
-      if (path !== undefined) {
-        updates.push('path = ?');
-        params.push(path);
-      }
-      if (active !== undefined) {
-        updates.push('active = ?');
-        params.push(active ? 1 : 0);
-      }
-
-      if (updates.length === 0) {
+      if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ error: 'No hay campos para actualizar' });
       }
 
-      updates.push('updated_at = CURRENT_TIMESTAMP');
-      params.push(id);
+      try {
+        const camera = await prisma.cameras.update({
+          where: { id: parseInt(id) },
+          data: updateData
+        });
 
-      db.run(
-        `UPDATE cameras SET ${updates.join(', ')} WHERE id = ?`,
-        params,
-        function(err) {
-          if (err) {
-            if (err.message.includes('UNIQUE constraint failed')) {
-              return res.status(409).json({ error: 'Ya existe una cámara con ese nombre' });
-            }
-            console.error('Error updating camera:', err);
-            return res.status(500).json({ error: 'Error al actualizar cámara' });
-          }
-
-          if (this.changes === 0) {
-            return res.status(404).json({ error: 'Cámara no encontrada' });
-          }
-
-          res.json({ success: true, message: 'Cámara actualizada exitosamente' });
+        res.json({ success: true, message: 'Cámara actualizada exitosamente', camera });
+      } catch (error) {
+        if (error.code === 'P2025') {
+          return res.status(404).json({ error: 'Cámara no encontrada' });
         }
-      );
+        if (error.code === 'P2002') {
+          return res.status(409).json({ error: 'Ya existe una cámara con ese nombre' });
+        }
+        throw error;
+      }
     } catch (error) {
       console.error('Error updating camera:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
@@ -224,23 +182,22 @@ class CameraController {
   async deleteCamera(req, res) {
     try {
       const { id } = req.params;
-      const db = getDatabase();
 
-      db.run('DELETE FROM cameras WHERE id = ?', [id], function(err) {
-        if (err) {
-          console.error('Error deleting camera:', err);
-          return res.status(500).json({ error: 'Error al eliminar cámara' });
-        }
-
-        if (this.changes === 0) {
-          return res.status(404).json({ error: 'Cámara no encontrada' });
-        }
+      try {
+        await prisma.cameras.delete({
+          where: { id: parseInt(id) }
+        });
 
         res.json({ success: true, message: 'Cámara eliminada exitosamente' });
-      });
+      } catch (error) {
+        if (error.code === 'P2025') {
+          return res.status(404).json({ error: 'Cámara no encontrada' });
+        }
+        throw error;
+      }
     } catch (error) {
       console.error('Error deleting camera:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      res.status(500).json({ error: 'Error al eliminar cámara' });
     }
   }
 
@@ -250,57 +207,53 @@ class CameraController {
   async testCameraConnection(req, res) {
     try {
       const { id } = req.params;
-      const db = getDatabase();
 
-      db.get('SELECT ip, port, username, password, path FROM cameras WHERE id = ?', [id], (err, camera) => {
-        if (err) {
-          console.error('Error fetching camera:', err);
-          return res.status(500).json({ error: 'Error al obtener cámara' });
+      const camera = await prisma.cameras.findUnique({
+        where: { id: parseInt(id) },
+        select: {
+          id: true,
+          ip: true,
+          port: true,
+          username: true,
+          password: true,
+          path: true
         }
-
-        if (!camera) {
-          return res.status(404).json({ error: 'Cámara no encontrada' });
-        }
-
-        // Build RTSP URL
-        let rtspUrl = `rtsp://${camera.ip}:${camera.port}${camera.path}`;
-        if (camera.username && camera.password) {
-          rtspUrl = `rtsp://${camera.username}:${camera.password}@${camera.ip}:${camera.port}${camera.path}`;
-        }
-
-        // For now, simulate a connection test (would need actual RTSP testing library)
-        const connectionStatus = 'testing';
-        
-        // Update last_checked timestamp
-        db.run(
-          'UPDATE cameras SET connection_status = ?, last_checked = CURRENT_TIMESTAMP WHERE id = ?',
-          [connectionStatus, id],
-          (updateErr) => {
-            if (updateErr) {
-              console.error('Error updating camera status:', updateErr);
-            }
-
-            // Simulate async test and respond
-            setTimeout(() => {
-              res.json({
-                success: true,
-                connection_status: 'connected',
-                rtsp_url: rtspUrl,
-                message: 'Conexión a cámara establecida exitosamente'
-              });
-
-              // Update final status
-              db.run(
-                'UPDATE cameras SET connection_status = ? WHERE id = ?',
-                ['connected', id],
-                (err) => {
-                  if (err) console.error('Error updating final camera status:', err);
-                }
-              );
-            }, 2000);
-          }
-        );
       });
+
+      if (!camera) {
+        return res.status(404).json({ error: 'Cámara no encontrada' });
+      }
+
+      // Build RTSP URL
+      let rtspUrl = `rtsp://${camera.ip}:${camera.port}${camera.path}`;
+      if (camera.username && camera.password) {
+        rtspUrl = `rtsp://${camera.username}:${camera.password}@${camera.ip}:${camera.port}${camera.path}`;
+      }
+
+      // Update last_checked timestamp to "testing"
+      await prisma.cameras.update({
+        where: { id: parseInt(id) },
+        data: {
+          connection_status: 'testing',
+          last_checked: new Date()
+        }
+      });
+
+      // Simulate async test and respond
+      res.json({
+        success: true,
+        connection_status: 'connected',
+        rtsp_url: rtspUrl,
+        message: 'Conexión a cámara establecida exitosamente'
+      });
+
+      // Update final status asynchronously
+      setTimeout(() => {
+        prisma.cameras.update({
+          where: { id: parseInt(id) },
+          data: { connection_status: 'connected' }
+        }).catch(err => console.error('Error updating camera status:', err));
+      }, 2000);
     } catch (error) {
       console.error('Error testing camera connection:', error);
       res.status(500).json({ error: 'Error interno del servidor' });

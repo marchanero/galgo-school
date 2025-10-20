@@ -1,46 +1,4 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-
-// Path to the database
-const dbPath = path.join(__dirname, '../../sensors.db');
-
-/**
- * Execute a database query with a promise
- */
-function dbQuery(query, params = []) {
-  return new Promise((resolve, reject) => {
-    const db = new sqlite3.Database(dbPath);
-    
-    if (query.trim().toUpperCase().startsWith('SELECT')) {
-      db.all(query, params, (err, rows) => {
-        db.close();
-        if (err) reject(err);
-        else resolve(rows);
-      });
-    } else {
-      db.run(query, params, function(err) {
-        db.close();
-        if (err) reject(err);
-        else resolve({ id: this.lastID, changes: this.changes });
-      });
-    }
-  });
-}
-
-/**
- * Execute a single row database query
- */
-function dbGet(query, params = []) {
-  return new Promise((resolve, reject) => {
-    const db = new sqlite3.Database(dbPath);
-    
-    db.get(query, params, (err, row) => {
-      db.close();
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
-}
+const prisma = require('../lib/prisma');
 
 class SensorsController {
   /**
@@ -49,23 +7,21 @@ class SensorsController {
    */
   async getAllSensors(req, res) {
     try {
-      const query = `
-        SELECT 
-          s.*,
-          COUNT(sd.id) as data_count,
-          MAX(sd.timestamp) as last_reading
-        FROM sensors s
-        LEFT JOIN sensor_data sd ON s.id = sd.sensor_id
-        GROUP BY s.id
-        ORDER BY s.id DESC
-      `;
+      const sensors = await prisma.sensors.findMany({
+        orderBy: { id: 'desc' },
+        include: {
+          sensor_data: true
+        }
+      });
 
-      const sensors = await dbQuery(query);
-
-      // Parse JSON data field for each sensor
+      // Add computed fields
       const processedSensors = sensors.map(sensor => ({
         ...sensor,
-        data: sensor.data ? JSON.parse(sensor.data) : null
+        data: sensor.data ? JSON.parse(sensor.data) : null,
+        data_count: sensor.sensor_data.length,
+        last_reading: sensor.sensor_data.length > 0 
+          ? sensor.sensor_data[0].timestamp 
+          : null
       }));
 
       res.json({
@@ -90,21 +46,14 @@ class SensorsController {
     try {
       const { id } = req.params;
 
-      const query = `
-        SELECT 
-          s.*,
-          COUNT(sd.id) as data_count,
-          MAX(sd.timestamp) as last_reading,
-          AVG(sd.numeric_value) as avg_value,
-          MIN(sd.numeric_value) as min_reading,
-          MAX(sd.numeric_value) as max_reading
-        FROM sensors s
-        LEFT JOIN sensor_data sd ON s.id = sd.sensor_id
-        WHERE s.id = ?
-        GROUP BY s.id
-      `;
-
-      const sensor = await dbGet(query, [id]);
+      const sensor = await prisma.sensors.findUnique({
+        where: { id: parseInt(id) },
+        include: {
+          sensor_data: {
+            orderBy: { timestamp: 'desc' }
+          }
+        }
+      });
 
       if (!sensor) {
         return res.status(404).json({
@@ -113,10 +62,21 @@ class SensorsController {
         });
       }
 
-      // Parse JSON data field
+      // Calculate aggregated metrics from sensor_data
+      const numericValues = sensor.sensor_data
+        .map(d => d.numeric_value)
+        .filter(v => v !== null);
+      
       const processedSensor = {
         ...sensor,
-        data: sensor.data ? JSON.parse(sensor.data) : null
+        data: sensor.data ? JSON.parse(sensor.data) : null,
+        data_count: sensor.sensor_data.length,
+        last_reading: sensor.sensor_data.length > 0 ? sensor.sensor_data[0].timestamp : null,
+        avg_value: numericValues.length > 0 
+          ? numericValues.reduce((a, b) => a + b, 0) / numericValues.length 
+          : null,
+        min_reading: numericValues.length > 0 ? Math.min(...numericValues) : null,
+        max_reading: numericValues.length > 0 ? Math.max(...numericValues) : null
       };
 
       res.json({
@@ -160,10 +120,14 @@ class SensorsController {
       }
 
       // Check if sensor with same name or topic already exists
-      const existingSensor = await dbGet(`
-        SELECT id FROM sensors 
-        WHERE name = ? OR topic = ?
-      `, [name, topic]);
+      const existingSensor = await prisma.sensors.findFirst({
+        where: {
+          OR: [
+            { name },
+            { topic }
+          ]
+        }
+      });
 
       if (existingSensor) {
         return res.status(409).json({
@@ -172,37 +136,27 @@ class SensorsController {
         });
       }
 
-      // Insert new sensor
-      const result = await dbQuery(`
-        INSERT INTO sensors 
-        (name, type, topic, description, unit, min_value, max_value, data, active, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      `, [
-        name,
-        type,
-        topic,
-        description || null,
-        unit || null,
-        min_value || null,
-        max_value || null,
-        data ? JSON.stringify(data) : null,
-        active ? 1 : 0
-      ]);
+      // Create new sensor
+      const sensor = await prisma.sensors.create({
+        data: {
+          name,
+          type,
+          topic,
+          description: description || null,
+          unit: unit || null,
+          min_value: min_value || null,
+          max_value: max_value || null,
+          data: data ? JSON.stringify(data) : null,
+          active: active ? true : false
+        }
+      });
 
       res.status(201).json({
         success: true,
         message: 'Sensor created successfully',
         sensor: {
-          id: result.id,
-          name,
-          type,
-          topic,
-          description,
-          unit,
-          min_value,
-          max_value,
-          data,
-          active
+          ...sensor,
+          data: sensor.data ? JSON.parse(sensor.data) : null
         }
       });
 
@@ -234,41 +188,41 @@ class SensorsController {
         active
       } = req.body;
 
-      // Check if sensor exists
-      const sensor = await dbGet(`SELECT id FROM sensors WHERE id = ?`, [id]);
-
-      if (!sensor) {
-        return res.status(404).json({
-          error: 'Sensor not found',
-          message: `No sensor found with ID: ${id}`
+      try {
+        // Update sensor
+        const sensor = await prisma.sensors.update({
+          where: { id: parseInt(id) },
+          data: {
+            name,
+            type,
+            topic,
+            description: description || null,
+            unit: unit || null,
+            min_value: min_value || null,
+            max_value: max_value || null,
+            data: data ? JSON.stringify(data) : null,
+            active: active !== undefined ? active : undefined,
+            updated_at: new Date()
+          }
         });
+
+        res.json({
+          success: true,
+          message: 'Sensor updated successfully',
+          sensor: {
+            ...sensor,
+            data: sensor.data ? JSON.parse(sensor.data) : null
+          }
+        });
+      } catch (error) {
+        if (error.code === 'P2025') {
+          return res.status(404).json({
+            error: 'Sensor not found',
+            message: `No sensor found with ID: ${id}`
+          });
+        }
+        throw error;
       }
-
-      // Update sensor
-      const result = await dbQuery(`
-        UPDATE sensors 
-        SET name = ?, type = ?, topic = ?, description = ?, 
-            unit = ?, min_value = ?, max_value = ?, data = ?, active = ?,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `, [
-        name,
-        type,
-        topic,
-        description || null,
-        unit || null,
-        min_value || null,
-        max_value || null,
-        data ? JSON.stringify(data) : null,
-        active ? 1 : 0,
-        id
-      ]);
-
-      res.json({
-        success: true,
-        message: 'Sensor updated successfully',
-        changes: result.changes
-      });
 
     } catch (error) {
       console.error('Error in updateSensor:', error);
@@ -287,24 +241,25 @@ class SensorsController {
     try {
       const { id } = req.params;
 
-      // Check if sensor exists
-      const sensor = await dbGet(`SELECT id, name FROM sensors WHERE id = ?`, [id]);
-
-      if (!sensor) {
-        return res.status(404).json({
-          error: 'Sensor not found',
-          message: `No sensor found with ID: ${id}`
+      try {
+        // Delete sensor (will cascade delete sensor_data due to Prisma relationship)
+        const sensor = await prisma.sensors.delete({
+          where: { id: parseInt(id) }
         });
+
+        res.json({
+          success: true,
+          message: `Sensor "${sensor.name}" deleted successfully`
+        });
+      } catch (error) {
+        if (error.code === 'P2025') {
+          return res.status(404).json({
+            error: 'Sensor not found',
+            message: `No sensor found with ID: ${id}`
+          });
+        }
+        throw error;
       }
-
-      // Delete sensor (this will cascade delete sensor_data due to FK constraint)
-      const result = await dbQuery(`DELETE FROM sensors WHERE id = ?`, [id]);
-
-      res.json({
-        success: true,
-        message: `Sensor "${sensor.name}" deleted successfully`,
-        changes: result.changes
-      });
 
     } catch (error) {
       console.error('Error in deleteSensor:', error);
@@ -324,27 +279,23 @@ class SensorsController {
       const { id } = req.params;
       const { limit = 100, offset = 0, from, to } = req.query;
 
-      let query = `
-        SELECT * FROM sensor_data 
-        WHERE sensor_id = ?
-      `;
-      let params = [id];
+      const where = {
+        sensor_id: parseInt(id)
+      };
 
       // Add date filters if provided
-      if (from) {
-        query += ` AND timestamp >= ?`;
-        params.push(from);
-      }
-      
-      if (to) {
-        query += ` AND timestamp <= ?`;
-        params.push(to);
+      if (from || to) {
+        where.timestamp = {};
+        if (from) where.timestamp.gte = new Date(from);
+        if (to) where.timestamp.lte = new Date(to);
       }
 
-      query += ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
-      params.push(parseInt(limit), parseInt(offset));
-
-      const data = await dbQuery(query, params);
+      const data = await prisma.sensor_data.findMany({
+        where,
+        orderBy: { timestamp: 'desc' },
+        take: parseInt(limit),
+        skip: parseInt(offset)
+      });
 
       res.json({
         success: true,
@@ -388,30 +339,21 @@ class SensorsController {
         numeric_value = parsedValue;
       }
 
-      const result = await dbQuery(`
-        INSERT INTO sensor_data 
-        (sensor_id, topic, value, numeric_value, timestamp, raw_message)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `, [
-        id,
-        topic,
-        String(value),
-        numeric_value,
-        timestamp || new Date().toISOString(),
-        raw_message || null
-      ]);
+      const data = await prisma.sensor_data.create({
+        data: {
+          sensor_id: parseInt(id),
+          topic,
+          value: String(value),
+          numeric_value,
+          timestamp: timestamp ? new Date(timestamp) : new Date(),
+          raw_message: raw_message || null
+        }
+      });
 
       res.status(201).json({
         success: true,
         message: 'Sensor data added successfully',
-        data: {
-          id: result.id,
-          sensor_id: id,
-          value,
-          numeric_value,
-          topic,
-          timestamp: timestamp || new Date().toISOString()
-        }
+        data
       });
 
     } catch (error) {
