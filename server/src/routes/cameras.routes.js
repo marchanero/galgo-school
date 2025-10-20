@@ -299,4 +299,87 @@ router.delete('/:id', cameraController.deleteCamera.bind(cameraController));
  */
 router.post('/:id/test', cameraController.testCameraConnection.bind(cameraController));
 
+/**
+ * @swagger
+ * /api/cameras/{id}/snapshot:
+ *   get:
+ *     summary: Capturar snapshot de una cámara
+ *     tags: [Cameras]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID de la cámara
+ *     responses:
+ *       200:
+ *         description: Snapshot capturado exitosamente
+ *         content:
+ *           image/jpeg:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       404:
+ *         description: Cámara no encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Error capturando snapshot
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.get('/:id/snapshot', cameraController.getSnapshot.bind(cameraController));
+
+/**
+ * @swagger
+ * /api/cameras/{id}/info:
+ *   get:
+ *     summary: Obtener información del stream RTSP
+ *     tags: [Cameras]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID de la cámara
+ *     responses:
+ *       200:
+ *         description: Información del stream obtenida
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 resolution:
+ *                   type: string
+ *                   example: "1920x1080"
+ *                 codec:
+ *                   type: string
+ *                   example: "h264"
+ *                 fps:
+ *                   type: number
+ *                   example: 30
+ *       404:
+ *         description: Cámara no encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Error obteniendo información
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.get('/:id/info', cameraController.getStreamInfo.bind(cameraController));
+
 module.exports = router;

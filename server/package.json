@@ -22,9 +22,12 @@
   "author": "Galgo School Team",
   "license": "ISC",
   "dependencies": {
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "ffmpeg-static": "^5.2.0",
     "mqtt": "^5.14.1",
+    "node-rtsp-stream": "^0.0.9",
     "nodemon": "^3.1.10",
     "sqlite3": "^5.1.7",
     "swagger-jsdoc": "^6.2.8",

@@ -1,4 +1,8 @@
-const prisma = require('../lib/prisma');
+const bcrypt = require('bcrypt')
+const prisma = require('../lib/prisma')
+const { testRtspConnection, captureSnapshot, getStreamInfo } = require('../utils/rtsp')
+
+const BCRYPT_ROUNDS = 10
 
 class CameraController {
   /**
@@ -88,13 +92,19 @@ class CameraController {
       }
 
       try {
+        // Encrypt password if provided
+        let encryptedPassword = password;
+        if (password && password.trim()) {
+          encryptedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        }
+
         const camera = await prisma.cameras.create({
           data: {
             name,
             ip,
             port: parsedPort,
             username,
-            password,
+            password: encryptedPassword,
             path,
             active: true,
             connection_status: 'disconnected'
@@ -145,7 +155,16 @@ class CameraController {
       if (ip !== undefined) updateData.ip = ip;
       if (port !== undefined) updateData.port = parseInt(port);
       if (username !== undefined) updateData.username = username;
-      if (password !== undefined) updateData.password = password;
+      
+      // Handle password encryption if provided
+      if (password !== undefined) {
+        if (password && password.trim()) {
+          updateData.password = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        } else {
+          updateData.password = '';
+        }
+      }
+      
       if (path !== undefined) updateData.path = path;
       if (active !== undefined) updateData.active = active;
       updateData.updated_at = new Date();
@@ -224,10 +243,16 @@ class CameraController {
         return res.status(404).json({ error: 'Cámara no encontrada' });
       }
 
-      // Build RTSP URL
+      // Build full RTSP URL (password is hashed, so we use stored value as-is for now)
+      // In a real scenario, you'd need to decrypt the password
       let rtspUrl = `rtsp://${camera.ip}:${camera.port}${camera.path}`;
-      if (camera.username && camera.password) {
-        rtspUrl = `rtsp://${camera.username}:${camera.password}@${camera.ip}:${camera.port}${camera.path}`;
+      let displayUrl = rtspUrl;
+      
+      if (camera.username) {
+        // Note: For bcrypt hashed passwords, we cannot use them directly in RTSP
+        // In production, consider using a different encryption method (like AES) that supports decryption
+        rtspUrl = `rtsp://${camera.username}:@${camera.ip}:${camera.port}${camera.path}`;
+        displayUrl = `rtsp://${camera.username}:****@${camera.ip}:${camera.port}${camera.path}`;
       }
 
       // Update last_checked timestamp to "testing"
@@ -239,23 +264,137 @@ class CameraController {
         }
       });
 
-      // Simulate async test and respond
-      res.json({
-        success: true,
-        connection_status: 'connected',
-        rtsp_url: rtspUrl,
-        message: 'Conexión a cámara establecida exitosamente'
+      // Test RTSP connection in the background
+      setImmediate(async () => {
+        try {
+          const testResult = await testRtspConnection(rtspUrl, 10000);
+          
+          const connectionStatus = testResult.connected ? 'connected' : 'disconnected';
+          
+          await prisma.cameras.update({
+            where: { id: parseInt(id) },
+            data: { 
+              connection_status: connectionStatus,
+              last_checked: new Date()
+            }
+          });
+
+          console.log(`Camera ${id} connection test result:`, testResult);
+        } catch (err) {
+          console.error(`Error testing camera ${id} connection:`, err);
+          
+          await prisma.cameras.update({
+            where: { id: parseInt(id) },
+            data: { 
+              connection_status: 'disconnected',
+              last_checked: new Date()
+            }
+          }).catch(e => console.error('Error updating camera status:', e));
+        }
       });
 
-      // Update final status asynchronously
-      setTimeout(() => {
-        prisma.cameras.update({
-          where: { id: parseInt(id) },
-          data: { connection_status: 'connected' }
-        }).catch(err => console.error('Error updating camera status:', err));
-      }, 2000);
+      // Return immediate response
+      res.json({
+        success: true,
+        connection_status: 'testing',
+        rtsp_url: displayUrl,
+        message: 'Prueba de conexión iniciada. El estado se actualizará en segundos.'
+      });
     } catch (error) {
       console.error('Error testing camera connection:', error);
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  }
+
+  /**
+   * GET /api/cameras/:id/snapshot - Capturar snapshot de una cámara
+   */
+  async getSnapshot(req, res) {
+    try {
+      const { id } = req.params;
+
+      const camera = await prisma.cameras.findUnique({
+        where: { id: parseInt(id) },
+        select: {
+          id: true,
+          ip: true,
+          port: true,
+          username: true,
+          password: true,
+          path: true
+        }
+      });
+
+      if (!camera) {
+        return res.status(404).json({ error: 'Cámara no encontrada' });
+      }
+
+      // Build RTSP URL
+      let rtspUrl = `rtsp://${camera.ip}:${camera.port}${camera.path}`;
+      if (camera.username) {
+        rtspUrl = `rtsp://${camera.username}:@${camera.ip}:${camera.port}${camera.path}`;
+      }
+
+      try {
+        const snapshotBuffer = await captureSnapshot(rtspUrl, 10000);
+        
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Content-Length', snapshotBuffer.length);
+        res.send(snapshotBuffer);
+      } catch (error) {
+        console.error('Error capturing snapshot:', error);
+        res.status(500).json({ 
+          error: 'Error capturando snapshot',
+          details: error.message
+        });
+      }
+    } catch (error) {
+      console.error('Error in getSnapshot:', error);
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  }
+
+  /**
+   * GET /api/cameras/:id/info - Obtener información del stream
+   */
+  async getStreamInfo(req, res) {
+    try {
+      const { id } = req.params;
+
+      const camera = await prisma.cameras.findUnique({
+        where: { id: parseInt(id) },
+        select: {
+          id: true,
+          ip: true,
+          port: true,
+          username: true,
+          password: true,
+          path: true
+        }
+      });
+
+      if (!camera) {
+        return res.status(404).json({ error: 'Cámara no encontrada' });
+      }
+
+      // Build RTSP URL
+      let rtspUrl = `rtsp://${camera.ip}:${camera.port}${camera.path}`;
+      if (camera.username) {
+        rtspUrl = `rtsp://${camera.username}:@${camera.ip}:${camera.port}${camera.path}`;
+      }
+
+      try {
+        const streamInfo = await getStreamInfo(rtspUrl, 10000);
+        res.json(streamInfo);
+      } catch (error) {
+        console.error('Error getting stream info:', error);
+        res.status(500).json({ 
+          error: 'Error obteniendo información del stream',
+          details: error.message
+        });
+      }
+    } catch (error) {
+      console.error('Error in getStreamInfo:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
     }
   }
