@@ -976,6 +976,72 @@ function App() {
     }
   }
 
+  // Switch MQTT broker dynamically
+  const switchMqttBroker = async (newBroker) => {
+    try {
+      setMqttConnecting(true)
+      const loadingToast = toast.loading('Cambiando broker MQTT...', {
+        duration: 10000
+      })
+
+      // Build MQTT broker URL
+      const protocol = newBroker.ssl ? 'mqtts' : 'mqtt'
+      const brokerUrl = `${protocol}://${newBroker.host}:${newBroker.port}`
+
+      console.log(`🔄 Switching to MQTT broker: ${brokerUrl}`)
+
+      const response = await fetch(`${API_URL}/api/mqtt/switch-broker`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          broker: brokerUrl,
+          username: newBroker.username || undefined,
+          password: newBroker.password || undefined,
+          ssl: newBroker.ssl
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        // Update configurations with new broker settings
+        updateConfiguration('mqtt', 'host', newBroker.host)
+        updateConfiguration('mqtt', 'port', newBroker.port)
+        updateConfiguration('mqtt', 'username', newBroker.username || '')
+        updateConfiguration('mqtt', 'password', newBroker.password || '')
+        updateConfiguration('mqtt', 'ssl', newBroker.ssl)
+
+        // Update MQTT status
+        setMqttStatus(prev => ({
+          ...prev,
+          connected: true,
+          broker: brokerUrl,
+          lastChecked: new Date().toISOString()
+        }))
+
+        toast.dismiss(loadingToast)
+        toast.success(`✅ Broker cambiado a: ${newBroker.name || brokerUrl}`, {
+          duration: 4000,
+          icon: '🔄'
+        })
+      } else {
+        throw new Error(data.message || 'Error al cambiar broker')
+      }
+    } catch (error) {
+      console.error('Error switching MQTT broker:', error)
+      setMqttStatus(prev => ({
+        ...prev,
+        connected: false,
+        lastChecked: new Date().toISOString()
+      }))
+      toast.error(`❌ Error al cambiar broker: ${error.message}`, {
+        duration: 5000
+      })
+    } finally {
+      setMqttConnecting(false)
+    }
+  }
+
   // Configuration management functions
   const updateConfiguration = (section, key, value) => {
     setConfigurations(prev => ({
@@ -2717,25 +2783,21 @@ function App() {
                                 ].find(broker => broker.name === e.target.value)
 
                                 if (selectedBroker) {
-                                  updateConfiguration('mqtt', 'host', selectedBroker.host)
-                                  updateConfiguration('mqtt', 'port', selectedBroker.port)
-                                  updateConfiguration('mqtt', 'username', selectedBroker.username)
-                                  updateConfiguration('mqtt', 'password', selectedBroker.password)
-                                  updateConfiguration('mqtt', 'ssl', selectedBroker.ssl)
-                                  toast.success(`Configuración "${selectedBroker.name}" aplicada`, { duration: 2000 })
+                                  switchMqttBroker(selectedBroker)
                                 }
                                 // Reset select to empty
                                 e.target.value = ''
                               }
                             }}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            disabled={mqttConnecting}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <option value="">Seleccionar broker...</option>
                             <option value="EMQX Local">EMQX Local (localhost:1883)</option>
                             <option value="EMQX Remoto">EMQX Remoto (100.107.238.60:1883)</option>
                           </select>
                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            Selecciona un broker para autocompletar los campos
+                            Selecciona un broker para cambiar dinámicamente
                           </p>
                         </div>
 
@@ -2795,20 +2857,39 @@ function App() {
                           />
                         </div>
 
+                        <div className="space-y-3 mt-4">
                           <button
-                            onClick={handleConnect}
-                            disabled={mqttConnecting || mqttStatus.connected}
-                            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => switchMqttBroker({
+                              name: 'Configuración Manual',
+                              host: configurations.mqtt.host,
+                              port: configurations.mqtt.port,
+                              username: configurations.mqtt.username,
+                              password: configurations.mqtt.password,
+                              ssl: configurations.mqtt.ssl
+                            })}
+                            disabled={mqttConnecting}
+                            className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
                           >
-                            {mqttConnecting ? 'Conectando...' : 'Conectar'}
+                            {mqttConnecting ? 'Cambiando...' : '🔄 Cambiar Broker'}
                           </button>
-                          <button
-                            onClick={handleDisconnect}
-                            disabled={mqttConnecting || !mqttStatus.connected}
-                            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {mqttConnecting ? 'Desconectando...' : 'Desconectar'}
-                          </button>
+
+                          <div className="flex gap-2">
+                            <button
+                              onClick={handleConnect}
+                              disabled={mqttConnecting || mqttStatus.connected}
+                              className="flex-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {mqttConnecting ? 'Conectando...' : 'Conectar'}
+                            </button>
+                            <button
+                              onClick={handleDisconnect}
+                              disabled={mqttConnecting || !mqttStatus.connected}
+                              className="flex-1 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {mqttConnecting ? 'Desconectando...' : 'Desconectar'}
+                            </button>
+                          </div>
+                        </div>
 
                         <div className="text-sm text-gray-600 dark:text-gray-400">
                           Estado: <span className={`font-medium ${

@@ -304,6 +304,88 @@ class MqttController {
       });
     }
   }
+
+  /**
+   * Switch to a different MQTT broker
+   * POST /api/mqtt/switch-broker
+   */
+  async switchBroker(req, res) {
+    try {
+      const { broker, username, password, ssl } = req.body;
+
+      if (!broker) {
+        return res.status(400).json({
+          error: 'Broker URL is required',
+          message: 'Please provide a broker URL in the request body'
+        });
+      }
+
+      // Validate broker URL format
+      if (!broker.startsWith('mqtt://') && !broker.startsWith('mqtts://') && !broker.startsWith('ws://') && !broker.startsWith('wss://')) {
+        return res.status(400).json({
+          error: 'Invalid broker URL format',
+          message: 'Broker URL must start with mqtt://, mqtts://, ws://, or wss://'
+        });
+      }
+
+      // Get current broker info
+      const currentStatus = mqttService.getStatus();
+      const currentBroker = currentStatus.broker;
+      const currentTopics = currentStatus.topics;
+
+      // If already connected to the same broker, just return
+      if (currentBroker === broker) {
+        return res.json({
+          success: true,
+          message: 'Already connected to this broker',
+          data: currentStatus
+        });
+      }
+
+      // Prepare connection options
+      const options = {};
+      if (username) options.username = username;
+      if (password) options.password = password;
+      if (ssl !== undefined) options.rejectUnauthorized = false;
+
+      console.log(`🔄 Switching MQTT broker from ${currentBroker || 'none'} to ${broker}`);
+
+      // Connect to new broker
+      const result = await mqttService.connect(broker, options);
+
+      // Re-subscribe to all active topics on new broker
+      if (currentTopics && currentTopics.length > 0) {
+        console.log(`Re-subscribing to ${currentTopics.length} topics on new broker...`);
+        for (const topicData of currentTopics) {
+          if (topicData.active) {
+            try {
+              await mqttService.subscribe(topicData.topic, {
+                qos: topicData.qos,
+                active: true
+              });
+            } catch (error) {
+              console.error(`Failed to subscribe to ${topicData.topic}:`, error);
+            }
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `Successfully switched to broker: ${broker}`,
+        data: result
+      });
+
+    } catch (error) {
+      console.error('Error switching MQTT broker:', error);
+      res.status(400).json({
+        success: false,
+        error: 'Failed to switch MQTT broker',
+        message: error.message,
+        code: error.code || 'UNKNOWN_ERROR'
+      });
+    }
+  }
 }
 
 module.exports = new MqttController();

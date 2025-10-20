@@ -275,4 +275,59 @@ router.get('/messages', mqttController.getMessages);
  */
 router.post('/publish', mqttController.publishMessage);
 
+/**
+ * @swagger
+ * /api/mqtt/switch-broker:
+ *   post:
+ *     summary: Switch to a different MQTT broker
+ *     tags: [MQTT]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - broker
+ *             properties:
+ *               broker:
+ *                 type: string
+ *                 example: "mqtt://100.107.238.60:1883"
+ *               username:
+ *                 type: string
+ *                 example: "admin"
+ *               password:
+ *                 type: string
+ *                 example: "password123"
+ *               ssl:
+ *                 type: boolean
+ *                 default: false
+ *     responses:
+ *       200:
+ *         description: Successfully switched to new MQTT broker
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     success:
+ *                       type: boolean
+ *                     broker:
+ *                       type: string
+ *                     clientId:
+ *                       type: string
+ *       400:
+ *         description: Invalid broker URL or connection failed
+ *       500:
+ *         description: Server error during broker switch
+ */
+router.post('/switch-broker', mqttController.switchBroker);
+
 module.exports = router;
