@@ -44,11 +44,11 @@ function App() {
       quality: 'Alta (1080p)'
     },
     mqtt: {
-      defaultBroker: 'EMQX Test',
-      host: '100.82.84.24',
+      defaultBroker: 'EMQX Local',
+      host: 'localhost',
       port: 1883,
-      username: 'admin',
-      password: 'galgo2526',
+      username: '',
+      password: '',
       ssl: false,
       autoPolling: {
         enabled: true,
@@ -228,23 +228,7 @@ function App() {
     // Find the default broker configuration
     const defaultBrokerConfig = [
       {
-        name: 'EMQX Remoto',
-        host: '100.107.238.60',
-        port: 1883,
-        username: 'admin',
-        password: 'galgo2526',
-        ssl: false
-      },
-      {
-        name: 'EMQX Test',
-        host: '100.82.84.24',
-        port: 1883,
-        username: 'admin',
-        password: 'galgo2526',
-        ssl: false
-      },
-      {
-        name: 'Mosquitto Local',
+        name: 'EMQX Local',
         host: 'localhost',
         port: 1883,
         username: '',
@@ -252,28 +236,12 @@ function App() {
         ssl: false
       },
       {
-        name: 'HiveMQ Cloud',
-        host: 'broker.hivemq.com',
+        name: 'EMQX Remoto',
+        host: '100.107.238.60',
         port: 1883,
-        username: '',
-        password: '',
+        username: 'admin',
+        password: 'galgo2526',
         ssl: false
-      },
-      {
-        name: 'Eclipse Mosquitto',
-        host: 'test.mosquitto.org',
-        port: 1883,
-        username: '',
-        password: '',
-        ssl: false
-      },
-      {
-        name: 'EMQX Cloud (SSL)',
-        host: 'broker.emqx.io',
-        port: 8883,
-        username: '',
-        password: '',
-        ssl: true
       }
     ].find(broker => broker.name === configurations.mqtt.defaultBroker)
 
@@ -2601,6 +2569,15 @@ function App() {
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                         {[
                           {
+                            name: 'EMQX Local',
+                            host: 'localhost',
+                            port: 1883,
+                            username: '',
+                            password: '',
+                            ssl: false,
+                            description: 'Broker EMQX local'
+                          },
+                          {
                             name: 'EMQX Remoto',
                             host: '100.107.238.60',
                             port: 1883,
@@ -2608,60 +2585,6 @@ function App() {
                             password: 'galgo2526',
                             ssl: false,
                             description: 'Broker EMQX remoto'
-                          },
-                          {
-                            name: 'EMQX Test',
-                            host: '100.82.84.24',
-                            port: 1883,
-                            username: 'admin',
-                            password: 'galgo2526',
-                            ssl: false,
-                            description: 'Broker EMQX de pruebas'
-                          },
-                          {
-                            name: 'Mosquitto Local',
-                            host: 'localhost',
-                            port: 1883,
-                            username: '',
-                            password: '',
-                            ssl: false,
-                            description: 'Mosquitto en localhost'
-                          },
-                          {
-                            name: 'HiveMQ Cloud',
-                            host: 'broker.hivemq.com',
-                            port: 1883,
-                            username: '',
-                            password: '',
-                            ssl: false,
-                            description: 'Broker público HiveMQ'
-                          },
-                          {
-                            name: 'Eclipse Mosquitto',
-                            host: 'test.mosquitto.org',
-                            port: 1883,
-                            username: '',
-                            password: '',
-                            ssl: false,
-                            description: 'Broker público Mosquitto'
-                          },
-                          {
-                            name: 'EMQX Cloud (SSL)',
-                            host: 'broker.emqx.io',
-                            port: 8883,
-                            username: '',
-                            password: '',
-                            ssl: true,
-                            description: 'EMQX Cloud con SSL'
-                          },
-                          {
-                            name: 'AWS IoT Core',
-                            host: 'your-endpoint.amazonaws.com',
-                            port: 8883,
-                            username: '',
-                            password: '',
-                            ssl: true,
-                            description: 'AWS IoT Core (requiere configuración)'
                           }
                         ].map((preset, index) => {
                           const isDefault = configurations.mqtt.defaultBroker === preset.name
@@ -2761,23 +2684,7 @@ function App() {
                               if (e.target.value) {
                                 const selectedBroker = [
                                   {
-                                    name: 'EMQX Remoto',
-                                    host: '100.107.238.60',
-                                    port: 1883,
-                                    username: 'admin',
-                                    password: 'galgo2526',
-                                    ssl: false
-                                  },
-                                  {
-                                    name: 'EMQX Test',
-                                    host: '100.82.84.24',
-                                    port: 1883,
-                                    username: 'admin',
-                                    password: 'galgo2526',
-                                    ssl: false
-                                  },
-                                  {
-                                    name: 'Mosquitto Local',
+                                    name: 'EMQX Local',
                                     host: 'localhost',
                                     port: 1883,
                                     username: '',
@@ -2785,36 +2692,12 @@ function App() {
                                     ssl: false
                                   },
                                   {
-                                    name: 'HiveMQ Cloud',
-                                    host: 'broker.hivemq.com',
+                                    name: 'EMQX Remoto',
+                                    host: '100.107.238.60',
                                     port: 1883,
-                                    username: '',
-                                    password: '',
+                                    username: 'admin',
+                                    password: 'galgo2526',
                                     ssl: false
-                                  },
-                                  {
-                                    name: 'Eclipse Mosquitto',
-                                    host: 'test.mosquitto.org',
-                                    port: 1883,
-                                    username: '',
-                                    password: '',
-                                    ssl: false
-                                  },
-                                  {
-                                    name: 'EMQX Cloud (SSL)',
-                                    host: 'broker.emqx.io',
-                                    port: 8883,
-                                    username: '',
-                                    password: '',
-                                    ssl: true
-                                  },
-                                  {
-                                    name: 'AWS IoT Core',
-                                    host: 'your-endpoint.amazonaws.com',
-                                    port: 8883,
-                                    username: '',
-                                    password: '',
-                                    ssl: true
                                   }
                                 ].find(broker => broker.name === e.target.value)
 
@@ -2833,13 +2716,9 @@ function App() {
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                           >
                             <option value="">Seleccionar broker...</option>
+                            <option value="EMQX Local">EMQX Local (localhost:1883)</option>
+                            <option value="EMQX Local">EMQX Local (localhost:1883)</option>
                             <option value="EMQX Remoto">EMQX Remoto (100.107.238.60:1883)</option>
-                            <option value="EMQX Test">EMQX Test (100.82.84.24:1883)</option>
-                            <option value="Mosquitto Local">Mosquitto Local (localhost:1883)</option>
-                            <option value="HiveMQ Cloud">HiveMQ Cloud (broker.hivemq.com:1883)</option>
-                            <option value="Eclipse Mosquitto">Eclipse Mosquitto (test.mosquitto.org:1883)</option>
-                            <option value="EMQX Cloud (SSL)">EMQX Cloud (SSL) (broker.emqx.io:8883)</option>
-                            <option value="AWS IoT Core">AWS IoT Core (your-endpoint.amazonaws.com:8883)</option>
                           </select>
                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             Selecciona un broker para autocompletar los campos

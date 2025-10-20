@@ -16,22 +16,6 @@ const MQTT_PRESETS = {
     password: 'galgo2526',
     description: 'Broker EMQX del laboratorio'
   },
-  'HiveMQ Cloud': {
-    host: '',
-    port: 8883,
-    ssl: true,
-    username: '',
-    password: '',
-    description: 'Broker en la nube de HiveMQ'
-  },
-  'Mosquitto Local': {
-    host: 'localhost',
-    port: 1883,
-    ssl: false,
-    username: '',
-    password: '',
-    description: 'Broker Mosquitto local'
-  },
   'Custom': {
     host: '',
     port: 1883,
