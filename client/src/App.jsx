@@ -987,12 +987,13 @@ function App() {
     }))
   }
 
-  const saveAllConfigurations = async () => {
+  const saveAllConfigurations = async (configsToSave = null) => {
     try {
+      const dataToSave = configsToSave || configurations
       const response = await fetch(`${API_URL}/api/configurations`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ configurations })
+        body: JSON.stringify({ configurations: dataToSave })
       })
 
       if (response.ok) {
@@ -1005,6 +1006,20 @@ function App() {
       toast.error('Error al guardar configuraciones', { duration: 5000 })
     }
   }
+
+  // Auto-save configurations with debounce
+  useEffect(() => {
+    const saveTimer = setTimeout(() => {
+      // Don't save if no configurations loaded yet (indicated by empty mqtt config)
+      if (!configurations.mqtt || !configurations.mqtt.defaultBroker) {
+        return
+      }
+      console.log('💾 Auto-guardando configuraciones...')
+      saveAllConfigurations(configurations)
+    }, 2000) // Save after 2 seconds of no changes
+
+    return () => clearTimeout(saveTimer)
+  }, [configurations])
 
   const handleThemeChange = (newTheme) => {
     setTheme(newTheme)
@@ -2716,7 +2731,6 @@ function App() {
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                           >
                             <option value="">Seleccionar broker...</option>
-                            <option value="EMQX Local">EMQX Local (localhost:1883)</option>
                             <option value="EMQX Local">EMQX Local (localhost:1883)</option>
                             <option value="EMQX Remoto">EMQX Remoto (100.107.238.60:1883)</option>
                           </select>
