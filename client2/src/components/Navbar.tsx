@@ -1,7 +1,9 @@
 import { useTheme } from '../hooks/useTheme';
+import { useUser } from '../contexts/UserContext';
 
 const Navbar = () => {
   const { theme, toggleTheme } = useTheme()
+  const { user } = useUser()
 
   return (
     <nav className="bg-gray-50 dark:bg-gray-800 shadow-lg border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50">
@@ -19,11 +21,15 @@ const Navbar = () => {
             <div className="hidden md:flex items-center space-x-4 text-sm">
               <div className="flex items-center space-x-2">
                 <span className="text-gray-600 dark:text-gray-400">Usuario:</span>
-                <span className="font-medium text-gray-900 dark:text-white">--</span>
+                <span className="font-medium text-gray-900 dark:text-white">
+                  {user ? user.name : '--'}
+                </span>
               </div>
               <div className="flex items-center space-x-2">
                 <span className="text-gray-600 dark:text-gray-400">Asignatura:</span>
-                <span className="font-medium text-gray-900 dark:text-white">--</span>
+                <span className="font-medium text-gray-900 dark:text-white">
+                  {user ? user.subject : '--'}
+                </span>
               </div>
             </div>
             

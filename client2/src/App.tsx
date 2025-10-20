@@ -2,8 +2,10 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import Navbar from './components/Navbar';
-import SensorCard from './components/SensorCard';
+import RFIDIdentification from './components/RFIDIdentification';
 import RecordingControl from './components/RecordingControl';
+import SensorCard from './components/SensorCard';
+import { UserProvider } from './contexts/UserContext';
 import type { MqttStatus, Sensor } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -167,62 +169,28 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <UserProvider>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-        <Navbar />
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+          <Navbar />
 
-        <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-          <div className="space-y-6">
-            {/* Identificación de Usuario */}
-            <div className="card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                    Identificación de Usuario
-                  </h2>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Acerque su tarjeta RFID/NFC para identificarse
-                  </p>
-                </div>
-                <div className="flex items-center space-x-4">
-                  <div className="text-center">
-                    <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-2">
-                      <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">Esperando tarjeta...</div>
-                  </div>
-                  <div className="border-l border-gray-200 dark:border-gray-600 pl-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-sm text-gray-600 dark:text-gray-400">Usuario:</span>
-                        <span className="font-medium text-gray-900 dark:text-white">--</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-sm text-gray-600 dark:text-gray-400">Asignatura:</span>
-                        <span className="font-medium text-gray-900 dark:text-white">--</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+          <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <div className="space-y-6">
+              {/* Control de Grabación */}
+              <RecordingControl
+                recordingState={recordingState}
+                elapsedTime={recordingDuration}
+                pausedTime={pausedTime}
+                totalRecordingTime={totalRecordingTime}
+                onStart={startRecording}
+                onPause={pauseRecording}
+                onResume={resumeRecording}
+                onStop={stopRecording}
+                onFinish={finishRecording}
+              />
 
-            {/* Control de Grabación */}
-            <RecordingControl
-              recordingState={recordingState}
-              elapsedTime={recordingDuration}
-              pausedTime={pausedTime}
-              totalRecordingTime={totalRecordingTime}
-              onStart={startRecording}
-              onPause={pauseRecording}
-              onResume={resumeRecording}
-              onStop={stopRecording}
-              onFinish={finishRecording}
-            />
-
-            {/* Broker Conectado */}
+              {/* Identificación de Usuario */}
+              <RFIDIdentification />            {/* Broker Conectado */}
             <div>
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
                 Broker MQTT
@@ -294,6 +262,7 @@ function App() {
         {/* <ThemeDebug /> */}
       </div>
     </div>
+    </UserProvider>
   );
 }
 

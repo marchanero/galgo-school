@@ -1,0 +1,38 @@
+{
+  "name": "galgo-school",
+  "version": "1.0.0",
+  "description": "Galgo School - Sistema de grabación y monitoreo con RFID/NFC e MQTT",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "dev": "concurrently \"cd server && npm run dev\" \"cd client && npm run dev\" \"cd client2 && npm run dev\"",
+    "dev:client": "cd client && npm run dev",
+    "dev:client2": "cd client2 && npm run dev",
+    "dev:server": "cd server && npm run dev",
+    "build": "pnpm -r build",
+    "build:client": "pnpm --filter=client build",
+    "build:client2": "pnpm --filter=client2 build",
+    "build:server": "pnpm --filter=server build || true",
+    "install-all": "pnpm install -r",
+    "lint": "pnpm -r lint",
+    "lint:client": "pnpm --filter=client lint",
+    "lint:client2": "pnpm --filter=client2 lint",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "keywords": [
+    "galgo",
+    "school",
+    "rfid",
+    "nfc",
+    "mqtt",
+    "recording",
+    "monitoring"
+  ],
+  "author": "Galgo School Team",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
