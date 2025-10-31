@@ -1,13 +1,86 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRFID } from '../hooks/useRFID'
+import axios from 'axios'
+
+interface RFIDTag {
+  id: number
+  tagId: string
+  userId: number | null
+  lastDetected: string | null
+  cardType: string | null
+  cardSize: number | null
+  userName: string | null
+  userSubject: string | null
+}
 
 const RFIDIdentification: React.FC = () => {
   const { user, rfidStatus, simulateCardRead, clearUser } = useRFID()
+  const [rfidTags, setRfidTags] = useState<RFIDTag[]>([])
+  const [loading, setLoading] = useState(false)
 
-  const handleSimulateCard = () => {
-    // Simular lectura de una tarjeta con ID de ejemplo
-    const testCardId = 'ABC123456789'
+  const sampleCards = [
+    { id: 'ABC123456789', name: 'María García' },
+    { id: 'DEF987654321', name: 'Carlos Rodríguez' },
+    { id: 'GHI456789123', name: 'Ana López' },
+    { id: 'JKL789123456', name: 'David Martínez' },
+    { id: 'MNO321654987', name: 'Laura Sánchez' }
+  ]
+
+  // Load RFID tags on component mount
+  useEffect(() => {
+    loadRfidTags()
+  }, [])
+
+  const loadRfidTags = async () => {
+    try {
+      const response = await axios.get('/api/nfc-events/rfid-tags')
+      if (response.data.success) {
+        setRfidTags(response.data.data)
+      }
+    } catch (error) {
+      console.error('Error loading RFID tags:', error)
+    }
+  }
+
+  const handleSimulateCard = (cardId?: string) => {
+    const testCardId = cardId || 'ABC123456789'
     simulateCardRead(testCardId)
+  }
+
+  const handleSimulateSpecificCard = (cardId: string) => {
+    simulateCardRead(cardId)
+  }
+
+  const handleAssignTag = async (userId: number, tagId: string) => {
+    if (!confirm(`¿Asignar la tarjeta ${tagId} al usuario?`)) return
+
+    setLoading(true)
+    try {
+      await axios.post(`/api/users/${userId}/assign-tag`, { tagId })
+      await loadRfidTags() // Reload tags
+      alert('Tarjeta asignada exitosamente')
+    } catch (error: any) {
+      console.error('Error assigning tag:', error)
+      alert(error.response?.data?.message || 'Error al asignar tarjeta')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleUnassignTag = async (userId: number) => {
+    if (!confirm('¿Desasignar la tarjeta del usuario?')) return
+
+    setLoading(true)
+    try {
+      await axios.post(`/api/users/${userId}/unassign-tag`)
+      await loadRfidTags() // Reload tags
+      alert('Tarjeta desasignada exitosamente')
+    } catch (error: any) {
+      console.error('Error unassigning tag:', error)
+      alert(error.response?.data?.message || 'Error al desasignar tarjeta')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const getStatusColor = () => {
@@ -124,6 +197,30 @@ const RFIDIdentification: React.FC = () => {
                 Desconectar
               </button>
             )}
+          </div>
+        </div>
+
+        {/* Lista de tarjetas de ejemplo */}
+        <div className="mt-6 border-t border-gray-200 dark:border-gray-600 pt-6">
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-3">
+            Tarjetas de Prueba Disponibles:
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {sampleCards.map((card) => (
+              <button
+                key={card.id}
+                onClick={() => handleSimulateSpecificCard(card.id)}
+                disabled={rfidStatus.isReading}
+                className="p-3 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg border border-gray-200 dark:border-gray-600 transition-colors duration-200 text-left"
+              >
+                <div className="text-sm font-medium text-gray-900 dark:text-white">
+                  {card.name}
+                </div>
+                <div className="text-xs font-mono text-gray-500 dark:text-gray-400 mt-1">
+                  {card.id}
+                </div>
+              </button>
+            ))}
           </div>
         </div>
       </div>

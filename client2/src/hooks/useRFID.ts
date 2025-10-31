@@ -79,6 +79,22 @@ export const useRFID = () => {
           error: null
         }))
 
+        // Record NFC access event
+        try {
+          await axios.post(`${API_URL}/api/nfc-events`, {
+            cardId: cardId,
+            eventType: 'access',
+            location: 'web-interface',
+            metadata: {
+              userAgent: navigator.userAgent,
+              timestamp: new Date().toISOString()
+            }
+          });
+          console.log('✅ NFC access event recorded');
+        } catch (eventError) {
+          console.error('❌ Error recording NFC event:', eventError);
+        }
+
         console.log('✅ Usuario identificado:', userData)
         return userData
       } else {
@@ -97,7 +113,25 @@ export const useRFID = () => {
   }, [setUser])
 
   // Limpiar usuario actual
-  const clearUser = useCallback(() => {
+  const clearUser = useCallback(async () => {
+    if (user) {
+      // Record NFC exit event
+      try {
+        await axios.post(`${API_URL}/api/nfc-events`, {
+          cardId: user.cardId,
+          eventType: 'exit',
+          location: 'web-interface',
+          metadata: {
+            userAgent: navigator.userAgent,
+            timestamp: new Date().toISOString()
+          }
+        });
+        console.log('✅ NFC exit event recorded');
+      } catch (eventError) {
+        console.error('❌ Error recording NFC exit event:', eventError);
+      }
+    }
+
     contextClearUser()
     setRfidStatus(prev => ({
       ...prev,
@@ -105,7 +139,7 @@ export const useRFID = () => {
       error: null
     }))
     console.log('🧹 Usuario desconectado')
-  }, [contextClearUser])
+  }, [contextClearUser, user])
 
   // Inicializar conexión al montar el componente
   useEffect(() => {

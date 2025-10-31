@@ -94,6 +94,56 @@ function initSensorsDB() {
       )
     `;
 
+    // Create users table for NFC identification
+    const createUsersTable = `
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        card_id TEXT UNIQUE,
+        student_id TEXT UNIQUE,
+        email TEXT,
+        active BOOLEAN DEFAULT 1,
+        last_access DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+
+    // Create RFID tags table for tracking physical cards
+    const createRfidTagsTable = `
+      CREATE TABLE IF NOT EXISTS rfid_tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tag_id TEXT NOT NULL UNIQUE,
+        user_id INTEGER,
+        last_detected DATETIME,
+        card_type TEXT,
+        card_size INTEGER,
+        active BOOLEAN DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+      )
+    `;
+
+    // Create NFC events table for tracking access events
+    const createNfcEventsTable = `
+      CREATE TABLE IF NOT EXISTS nfc_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        tag_id TEXT NOT NULL,
+        event_type TEXT NOT NULL, -- 'access', 'exit', 'denied', 'detected', 'removed'
+        sensor_id INTEGER,
+        location TEXT,
+        card_type TEXT,
+        card_size INTEGER,
+        metadata TEXT, -- JSON additional data
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users (id),
+        FOREIGN KEY (sensor_id) REFERENCES sensors (id)
+      )
+    `;
+
     // Create index for faster queries
     const createIndexes = [
       `CREATE INDEX IF NOT EXISTS idx_sensor_data_sensor_id ON sensor_data (sensor_id)`,
@@ -101,7 +151,13 @@ function initSensorsDB() {
       `CREATE INDEX IF NOT EXISTS idx_mqtt_topics_topic ON mqtt_topics (topic)`,
       `CREATE INDEX IF NOT EXISTS idx_sensors_active ON sensors (active)`,
       `CREATE INDEX IF NOT EXISTS idx_configurations_category ON configurations (category)`,
-      `CREATE INDEX IF NOT EXISTS idx_cameras_active ON cameras (active)`
+      `CREATE INDEX IF NOT EXISTS idx_cameras_active ON cameras (active)`,
+      `CREATE INDEX IF NOT EXISTS idx_users_card_id ON users (card_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_users_student_id ON users (student_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_rfid_tags_tag_id ON rfid_tags (tag_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_rfid_tags_user_id ON rfid_tags (user_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_nfc_events_user_id ON nfc_events (user_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_nfc_events_created_at ON nfc_events (created_at)`
     ];
 
     // Execute table creation
@@ -150,6 +206,33 @@ function initSensorsDB() {
           return;
         }
         console.log('✅ Cameras table created/verified');
+      });
+
+      db.run(createUsersTable, (err) => {
+        if (err) {
+          console.error('Error creating users table:', err);
+          reject(err);
+          return;
+        }
+        console.log('✅ Users table created/verified');
+      });
+
+      db.run(createRfidTagsTable, (err) => {
+        if (err) {
+          console.error('Error creating rfid_tags table:', err);
+          reject(err);
+          return;
+        }
+        console.log('✅ RFID Tags table created/verified');
+      });
+
+      db.run(createNfcEventsTable, (err) => {
+        if (err) {
+          console.error('Error creating nfc_events table:', err);
+          reject(err);
+          return;
+        }
+        console.log('✅ NFC Events table created/verified');
       });
 
     // Create indexes
@@ -296,6 +379,79 @@ function initSensorsDB() {
                 console.error('Error inserting default topic:', err);
               } else {
                 console.log(`✅ Default topic created: ${topic.topic}`);
+              }
+            });
+          });
+
+          stmt.finalize();
+        }
+      });
+
+      // Insert default users if table is empty
+      db.get("SELECT COUNT(*) as count FROM users", (err, row) => {
+        if (err) {
+          console.error('Error checking users count:', err);
+          return;
+        }
+
+        if (row.count === 0) {
+          console.log('👥 Inserting default users...');
+
+          const defaultUsers = [
+            {
+              name: 'María García',
+              subject: 'Matemáticas',
+              card_id: 'ABC123456789',
+              student_id: '2024001',
+              email: 'maria.garcia@galgo.edu'
+            },
+            {
+              name: 'Carlos Rodríguez',
+              subject: 'Física',
+              card_id: 'DEF987654321',
+              student_id: '2024002',
+              email: 'carlos.rodriguez@galgo.edu'
+            },
+            {
+              name: 'Ana López',
+              subject: 'Química',
+              card_id: 'GHI456789123',
+              student_id: '2024003',
+              email: 'ana.lopez@galgo.edu'
+            },
+            {
+              name: 'David Martínez',
+              subject: 'Biología',
+              card_id: 'JKL789123456',
+              student_id: '2024004',
+              email: 'david.martinez@galgo.edu'
+            },
+            {
+              name: 'Laura Sánchez',
+              subject: 'Historia',
+              card_id: 'MNO321654987',
+              student_id: '2024005',
+              email: 'laura.sanchez@galgo.edu'
+            }
+          ];
+
+          const stmt = db.prepare(`
+            INSERT INTO users (name, subject, card_id, student_id, email)
+            VALUES (?, ?, ?, ?, ?)
+          `);
+
+          defaultUsers.forEach(user => {
+            stmt.run([
+              user.name,
+              user.subject,
+              user.card_id,
+              user.student_id,
+              user.email
+            ], (err) => {
+              if (err) {
+                console.error('Error inserting default user:', err);
+              } else {
+                console.log(`✅ Default user created: ${user.name}`);
               }
             });
           });

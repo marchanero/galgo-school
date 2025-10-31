@@ -16,6 +16,14 @@ const MQTT_PRESETS = {
     password: 'galgo2526',
     description: 'Broker EMQX del laboratorio'
   },
+  'EMQX Test (100.82.84.24:1883)': {
+    host: '100.82.84.24',
+    port: 1883,
+    ssl: false,
+    username: 'admin',
+    password: 'galgo2526',
+    description: 'Broker EMQX de pruebas'
+  },
   'HiveMQ Cloud': {
     host: '',
     port: 8883,
