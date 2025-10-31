@@ -8,6 +8,9 @@ const routes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
 const logger = require('./middlewares/logger');
 
+// Load environment variables
+require('dotenv').config();
+
 // Initialize MQTT service (optional auto-connect)
 const mqttService = require('./services/mqtt.service');
 

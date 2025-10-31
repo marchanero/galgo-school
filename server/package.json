@@ -8,11 +8,17 @@
     "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["galgo", "mqtt", "sensors", "api"],
+  "keywords": [
+    "galgo",
+    "mqtt",
+    "sensors",
+    "api"
+  ],
   "author": "Galgo School Team",
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "mqtt": "^5.14.1",
     "nodemon": "^3.1.10",
