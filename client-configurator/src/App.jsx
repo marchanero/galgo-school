@@ -40,6 +40,11 @@ function App() {
   // Camera IPs state
   const [cameraIPs, setCameraIPs] = useState([])
   const [newCameraIP, setNewCameraIP] = useState({ name: '', ip: '', port: '554', username: '', password: '' })
+  
+  // Search/filter states for lists
+  const [searchCameras, setSearchCameras] = useState('')
+  const [searchSensors, setSearchSensors] = useState('')
+  const [searchMqttTopics, setSearchMqttTopics] = useState('')
 
   // Configurations state with persistence
   const defaultConfigurations = {
@@ -2462,51 +2467,70 @@ function App() {
 
                   {/* Lista de IPs guardadas */}
                   <div className="mb-6">
-                    <h4 className="font-medium text-gray-900 dark:text-white mb-3">IPs de Cámaras Guardadas</h4>
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-medium text-gray-900 dark:text-white">IPs de Cámaras Guardadas ({cameraIPs.length})</h4>
+                    </div>
+                    {cameraIPs.length > 0 && (
+                      <div className="mb-3">
+                        <input
+                          type="text"
+                          placeholder="🔍 Buscar por nombre o IP..."
+                          value={searchCameras}
+                          onChange={(e) => setSearchCameras(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+                        />
+                      </div>
+                    )}
                     {cameraIPs.length === 0 ? (
                       <p className="text-gray-500 dark:text-gray-400 text-center py-4">No hay IPs de cámaras guardadas</p>
                     ) : (
                       <div className="space-y-2 max-h-60 overflow-y-auto">
-                        {cameraIPs.map(camera => (
-                          <div key={camera.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
-                            <div className="flex-1">
-                              <div className="font-medium text-gray-900 dark:text-white">{camera.name}</div>
-                              <div className="text-sm text-gray-500 dark:text-gray-400">
-                                {camera.ip}:{camera.port}
-                                {camera.username && (
-                                  <span className="ml-2 text-blue-600 dark:text-blue-400">
-                                    (Usuario: {camera.username})
-                                  </span>
-                                )}
+                        {cameraIPs
+                          .filter(camera => 
+                            searchCameras === '' || 
+                            camera.name.toLowerCase().includes(searchCameras.toLowerCase()) ||
+                            camera.ip.includes(searchCameras)
+                          )
+                          .map(camera => (
+                            <div key={camera.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900 dark:text-white">{camera.name}</div>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
+                                  {camera.ip}:{camera.port}
+                                  {camera.username && (
+                                    <span className="ml-2 text-blue-600 dark:text-blue-400">
+                                      (Usuario: {camera.username})
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex space-x-2">
+                                <button
+                                  onClick={() => {
+                                    const newName = prompt('Nuevo nombre:', camera.name)
+                                    if (newName && newName.trim()) {
+                                      updateCameraIP(camera.id, { name: newName.trim() })
+                                    }
+                                  }}
+                                  className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                                  title="Editar nombre"
+                                >
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => removeCameraIP(camera.id)}
+                                  className="p-1.5 bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
+                                  title="Eliminar"
+                                >
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
                               </div>
                             </div>
-                            <div className="flex space-x-2">
-                              <button
-                                onClick={() => {
-                                  const newName = prompt('Nuevo nombre:', camera.name)
-                                  if (newName && newName.trim()) {
-                                    updateCameraIP(camera.id, { name: newName.trim() })
-                                  }
-                                }}
-                                className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-                                title="Editar nombre"
-                              >
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                              </button>
-                              <button
-                                onClick={() => removeCameraIP(camera.id)}
-                                className="p-1.5 bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
-                                title="Eliminar"
-                              >
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                          ))}
                       </div>
                     )}
                   </div>
