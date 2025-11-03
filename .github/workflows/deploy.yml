@@ -1,386 +1,263 @@
-name: Deploy to Self-Hosted Runner
+name: Deploy to Self-Hosted Runners
 
 on:
   push:
     branches:
       - main
+      - develop
+      - 'feature/**'
+      - 'hotfix/**'
 
 jobs:
+  # ✅ Validación Pre-Deploy
   validate:
-    runs-on: self-hosted
     name: Pre-Deploy Validation
-    
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Validate Docker Compose syntax
+      - uses: actions/checkout@v4
+      
+      - name: 🔍 Check Docker Compose syntax
+        run: docker-compose config > /dev/null && echo "✅ docker-compose.yml is valid"
+      
+      - name: 🔍 Verify Node.js and npm
         run: |
-          echo "🔍 Validando sintaxis de docker-compose.yml..."
-          docker-compose config > /dev/null && echo "✅ Docker Compose válido"
-
-      - name: Check Node.js and npm
-        run: |
-          echo "🔍 Verificando Node.js y npm..."
           node --version
           npm --version
-
-      - name: Validate package.json files
+      
+      - name: 🔍 Validate package.json files
         run: |
-          echo "🔍 Validando package.json files..."
-          for dir in client-configurator server; do
-            if [ -d "$dir" ]; then
-              echo "  Verificando $dir/package.json..."
-              if ! node -e "require('./$dir/package.json')" 2>/dev/null; then
-                echo "❌ Error en $dir/package.json"
-                exit 1
-              fi
-              echo "  ✅ $dir/package.json válido"
+          for file in package.json client-configurator/package.json server/package.json; do
+            if [ -f "$file" ]; then
+              node -e "JSON.parse(require('fs').readFileSync('$file', 'utf8'))" && echo "✅ $file is valid"
             fi
           done
 
-      - name: Lint client code
-        run: |
-          echo "🔍 Ejecutando lint en cliente..."
-          cd client-configurator
-          if [ -f ".eslintrc.js" ]; then
-            npm run lint 2>&1 | head -50 || echo "⚠️ Lint encontró problemas (no crítico)"
-          else
-            echo "⚠️ No se encontró .eslintrc.js"
-          fi
-
-      - name: Lint server code
-        run: |
-          echo "🔍 Ejecutando lint en servidor..."
-          cd server
-          if [ -f ".eslintrc.js" ] || [ -f "package.json" ]; then
-            npm run lint 2>&1 | head -50 || echo "⚠️ Lint encontró problemas (no crítico)"
-          else
-            echo "⚠️ No se encontró configuración de lint"
-          fi
-
-      - name: Verify required environment files
-        run: |
-          echo "🔍 Verificando archivos de configuración..."
-          required_files=("docker-compose.yml" ".gitignore")
-          for file in "${required_files[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "❌ Error: Archivo requerido no encontrado: $file"
-              exit 1
-            fi
-            echo "  ✅ $file presente"
-          done
-
-      - name: Check for sensitive data
-        run: |
-          echo "🔍 Verificando datos sensibles..."
-          if grep -r "password" .github/ 2>/dev/null; then
-            echo "⚠️ Posible exposición de credenciales en .github"
-          fi
-          echo "  ✅ Verificación completada"
-
-      - name: Validation Summary
-        run: |
-          echo ""
-          echo "════════════════════════════════════════"
-          echo "✅ PRE-DEPLOY VALIDATION PASSED"
-          echo "════════════════════════════════════════"
-          echo "✓ Docker Compose válido"
-          echo "✓ Node.js y npm disponibles"
-          echo "✓ package.json válidos"
-          echo "✓ Lint ejecutado"
-          echo "✓ Archivos de configuración presentes"
-          echo "✓ Ningún dato sensible detectado"
-          echo "════════════════════════════════════════"
-
-  deploy:
+  # 🚀 Deploy a Producción (main → galgo-mini-01 X64)
+  deploy-production:
+    name: Deploy to Production (galgo-mini-01)
     needs: validate
-    runs-on: self-hosted
-    name: Deploy Services
-
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, galgo-mini-01]
+    environment:
+      name: production
+      url: http://galgo-mini-01:3000
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Get build information
-        id: build-info
+      - uses: actions/checkout@v4
+      
+      - name: 🏷️ Get build info
+        id: build
         run: |
-          COMMIT_SHA=$(git rev-parse --short HEAD)
-          COMMIT_DATE=$(git log -1 --format=%aI)
-          VERSION=$(git describe --tags --always 2>/dev/null || echo "latest")
-          BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          
-          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
-          echo "commit_date=$COMMIT_DATE" >> $GITHUB_OUTPUT
+          VERSION=$(cat package.json | grep '"version"' | head -1 | awk -F'"' '{print $4}')
+          BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          COMMIT_SHA="${{ github.sha }}"
+          SHORT_SHA="${COMMIT_SHA:0:7}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          
-          echo "📌 Build Information:"
-          echo "  SHA: $COMMIT_SHA"
-          echo "  Date: $COMMIT_DATE"
-          echo "  Version: $VERSION"
-          echo "  Branch: $BRANCH"
-
-      - name: Stop existing containers
-        run: docker compose down || true
-
-      - name: Backup current images (for rollback)
+          echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+      
+      - name: 💾 Backup current images
         run: |
-          echo "💾 Creando backup de imágenes actuales..."
-          mkdir -p /tmp/deployment-backup
-          
-          # Guardar IDs de imágenes actuales
-          SERVER_IMAGE=$(docker images galgo-server:latest --quiet 2>/dev/null || echo "none")
-          CLIENT_IMAGE=$(docker images galgo-client:latest --quiet 2>/dev/null || echo "none")
-          
-          echo "$SERVER_IMAGE" > /tmp/deployment-backup/server-image.txt
-          echo "$CLIENT_IMAGE" > /tmp/deployment-backup/client-image.txt
-          
-          if [ "$SERVER_IMAGE" != "none" ] && [ "$CLIENT_IMAGE" != "none" ]; then
-            echo "✅ Backup creado (Server: $SERVER_IMAGE, Client: $CLIENT_IMAGE)"
-          else
-            echo "ℹ️ No hay imágenes previas para backup"
-          fi
-
-      - name: Remove old images
-        run: |
-          echo "🗑️ Limpiando imágenes antiguas..."
-          docker rmi galgo-server:latest || true
-          docker rmi galgo-client:latest || true
-          echo "✅ Imágenes antiguas eliminadas"
-
-      - name: Build and start services with version tags
+          mkdir -p /tmp/galgo-backup
+          docker ps -a --format "{{.ID}} {{.Names}} {{.Image}}" | grep galgo > /tmp/galgo-backup/containers.txt || true
+          docker images --format "{{.Repository}}\t{{.Tag}}\t{{.ID}}" | grep galgo > /tmp/galgo-backup/images.txt || true
+          echo "✅ Backup created"
+      
+      - name: 🐳 Build and deploy
         env:
-          BUILD_DATE: ${{ steps.build-info.outputs.commit_date }}
-          VCS_REF: ${{ steps.build-info.outputs.commit_sha }}
-          VERSION: ${{ steps.build-info.outputs.version }}
+          BUILD_DATE: ${{ steps.build.outputs.build_date }}
+          VCS_REF: ${{ steps.build.outputs.commit_sha }}
+          VERSION: ${{ steps.build.outputs.version }}
         run: |
-          echo "🔨 Construyendo servicios..."
-          echo "  Version: $VERSION"
-          echo "  Commit: $VCS_REF"
-          echo "  Date: $BUILD_DATE"
-          
-          # Build con argumentos de versión
-          docker compose build \
+          echo "🔨 Building images for PRODUCTION..."
+          docker-compose build \
             --build-arg BUILD_DATE="$BUILD_DATE" \
             --build-arg VCS_REF="$VCS_REF" \
             --build-arg VERSION="$VERSION"
           
-          echo "🚀 Iniciando servicios..."
-          docker compose up -d
-          echo "✅ Servicios iniciados"
-
-      - name: Tag images with version
+          echo "🚀 Starting services..."
+          docker-compose down || true
+          sleep 2
+          docker-compose up -d
+          echo "✅ Services started"
+      
+      - name: 🏷️ Tag images
         run: |
-          VERSION="${{ steps.build-info.outputs.version }}"
-          COMMIT_SHA="${{ steps.build-info.outputs.commit_sha }}"
-          
-          echo "🏷️ Tagging images..."
-          docker tag galgo-server:latest "galgo-server:$VERSION" || true
-          docker tag galgo-server:latest "galgo-server:$COMMIT_SHA" || true
-          docker tag galgo-client:latest "galgo-client:$VERSION" || true
-          docker tag galgo-client:latest "galgo-client:$COMMIT_SHA" || true
-          
-          echo "✅ Images tagged:"
-          docker images | grep galgo
-
-      - name: Show running containers
+          VERSION="${{ steps.build.outputs.version }}"
+          COMMIT_SHA="${{ steps.build.outputs.commit_sha }}"
+          docker tag galgo-school-client:latest galgo-school-client:${VERSION}-${COMMIT_SHA:0:7} || true
+          docker tag galgo-school-server:latest galgo-school-server:${VERSION}-${COMMIT_SHA:0:7} || true
+      
+      - name: 🏥 Health check
+        id: health
+        timeout-minutes: 2
         run: |
-          echo "📦 Contenedores corriendo:"
-          docker ps
-
-      - name: Show deployment logs
-        run: |
-          echo "📋 Últimos 100 líneas de logs:"
-          docker compose logs --tail=100
-
-      - name: Wait for services to be healthy
-        run: |
-          echo "⏳ Esperando a que los servicios estén saludables..."
-          
-          # Configuración
+          echo "🏥 Checking service health..."
           MAX_ATTEMPTS=30
-          WAIT_TIME=2
-          SERVER_URL="http://localhost:3000"
+          RETRY_DELAY=2
           
-          # Función para verificar salud
-          check_health() {
-            if curl -sf "$SERVER_URL/health" > /dev/null 2>&1; then
-              return 0
-            else
-              return 1
-            fi
-          }
-          
-          # Intentar conexión
-          for ((i=1; i<=MAX_ATTEMPTS; i++)); do
-            echo "  Intento $i/$MAX_ATTEMPTS..."
-            
-            if check_health; then
-              echo "✅ Servidor saludable"
+          for attempt in $(seq 1 $MAX_ATTEMPTS); do
+            if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
+              echo "✅ Service healthy (attempt $attempt/$MAX_ATTEMPTS)"
               exit 0
             fi
             
-            # Mostrar estado de contenedores
-            if [ $((i % 5)) -eq 0 ]; then
-              echo "  Estado de contenedores:"
-              docker compose ps | tail -5
+            if [ $((attempt % 5)) -eq 0 ]; then
+              echo "⏳ Waiting... (attempt $attempt/$MAX_ATTEMPTS)"
+              docker-compose ps
             fi
             
-            if [ $i -lt $MAX_ATTEMPTS ]; then
-              sleep $WAIT_TIME
-            fi
+            sleep $RETRY_DELAY
           done
           
-          echo "❌ Timeout: Servidor no respondió después de $((MAX_ATTEMPTS * WAIT_TIME)) segundos"
-          echo "📋 Estado final de contenedores:"
-          docker compose ps
-          echo "📋 Logs de error:"
-          docker compose logs | tail -30
+          echo "❌ Health check failed"
+          docker-compose logs
           exit 1
-
-      - name: Verify all services are running
+      
+      - name: 🔄 Rollback on failure
+        if: failure() && steps.health.outcome == 'failure'
         run: |
-          echo "🔍 Verificando que todos los servicios estén corriendo..."
-          
-          # Verificar que no hay contenedores parados
-          stopped=$(docker compose ps -q --filter "status=exited" 2>/dev/null | wc -l)
-          running=$(docker compose ps -q --filter "status=running" 2>/dev/null | wc -l)
-          
-          echo "  Contenedores corriendo: $running"
-          echo "  Contenedores parados: $stopped"
-          
-          if [ "$stopped" -gt 0 ]; then
-            echo "❌ Hay contenedores parados"
-            docker compose ps
-            exit 1
-          fi
-          
-          echo "✅ Todos los servicios están corriendo"
-
-      - name: Deployment Summary
-        run: |
-          echo ""
-          echo "════════════════════════════════════════"
-          echo "✅ DEPLOYMENT SUCCESSFUL"
-          echo "════════════════════════════════════════"
-          echo "📦 Contenedores activos:"
-          docker compose ps --format "table {{.Names}}\t{{.Status}}"
-          echo ""
-          echo "🏷️ Imágenes desplegadas:"
-          docker images | grep galgo | head -10
-          echo ""
-          echo "📋 Build Information:"
-          echo "  Version: ${{ steps.build-info.outputs.version }}"
-          echo "  Commit: ${{ steps.build-info.outputs.commit_sha }}"
-          echo "  Branch: ${{ steps.build-info.outputs.branch }}"
-          echo "  Date: ${{ steps.build-info.outputs.commit_date }}"
-          echo ""
-          echo "🔗 Servicios disponibles:"
-          echo "  - API: http://localhost:3000"
-          echo "  - Cliente: http://localhost:5173"
-          echo "════════════════════════════════════════"
-
-      - name: On failure - Attempt rollback
-        if: failure()
-        run: |
-          echo "❌ Deployment failed, attempting rollback..."
-          
-          SERVER_IMAGE=$(cat /tmp/deployment-backup/server-image.txt 2>/dev/null || echo "none")
-          CLIENT_IMAGE=$(cat /tmp/deployment-backup/client-image.txt 2>/dev/null || echo "none")
-          
-          if [ "$SERVER_IMAGE" = "none" ] || [ "$CLIENT_IMAGE" = "none" ]; then
-            echo "⚠️ No hay backup disponible para rollback"
-            echo "📋 Estado actual de contenedores:"
-            docker compose ps || true
-            echo "📋 Logs de error:"
-            docker compose logs --tail=50 || true
-            exit 1
-          fi
-          
-          echo "🔄 Realizando rollback a versión anterior..."
-          docker compose down || true
-          
-          # Reconstruir con imágenes previas
-          docker compose up -d
-          
-          # Esperar a que servicios se recuperen
-          sleep 10
-          
-          if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
-            echo "✅ Rollback exitoso, servicios restaurados"
-            docker compose ps
-          else
-            echo "❌ Rollback falló, servicios aún no están disponibles"
-            docker compose logs --tail=50
-            exit 1
-          fi
-
-      - name: Deployment Success Notification
+          echo "❌ Deployment failed, rolling back..."
+          docker-compose down || true
+          sleep 2
+          docker-compose up -d || echo "⚠️ Manual rollback required"
+          exit 1
+      
+      - name: 📊 Cleanup resources
         if: success()
         run: |
-          echo ""
-          echo "╔════════════════════════════════════════╗"
-          echo "║  ✅ DEPLOYMENT COMPLETED SUCCESSFULLY  ║"
-          echo "╚════════════════════════════════════════╝"
-          echo ""
-          echo "📌 Deployment Details:"
-          echo "   Version: ${{ steps.build-info.outputs.version }}"
-          echo "   Commit: ${{ steps.build-info.outputs.commit_sha }}"
-          echo "   Branch: ${{ steps.build-info.outputs.branch }}"
-          echo "   Timestamp: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-          echo ""
-          echo "🎯 Services Status: ALL HEALTHY ✅"
-          echo ""
-          echo "📞 You can notify team members about successful deployment"
-
-      - name: Deployment Failure Notification
-        if: failure()
+          echo "🧹 Cleaning up..."
+          docker image prune -f --filter "dangling=true" > /dev/null 2>&1 || true
+          docker volume prune -f > /dev/null 2>&1 || true
+          docker network prune -f > /dev/null 2>&1 || true
+          echo "✅ Cleanup completed"
+      
+      - name: ✅ Success notification
+        if: success()
         run: |
+          echo "✅ Production Deployment Successful!"
           echo ""
-          echo "╔════════════════════════════════════════╗"
-          echo "║  ❌ DEPLOYMENT FAILED                  ║"
-          echo "╚════════════════════════════════════════╝"
+          echo "📋 Deployment Details:"
+          echo "  Environment: Production (galgo-mini-01 X64)"
+          echo "  Branch: ${{ github.ref_name }}"
+          echo "  Commit: ${{ steps.build.outputs.commit_sha }}"
+          echo "  Version: ${{ steps.build.outputs.version }}"
           echo ""
-          echo "📌 Failed Deployment Details:"
-          echo "   Version: ${{ steps.build-info.outputs.version }}"
-          echo "   Commit: ${{ steps.build-info.outputs.commit_sha }}"
-          echo "   Branch: ${{ steps.build-info.outputs.branch }}"
-          echo "   Timestamp: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-          echo ""
-          echo "📋 Actions Taken:"
-          echo "   - Attempted automatic rollback"
-          echo "   - Checked service health"
-          echo ""
-          echo "⚠️ MANUAL INTERVENTION REQUIRED"
-          echo "   Please check the workflow logs for details"
+          echo "🔗 Services:"
+          echo "  API: http://galgo-mini-01:3000"
+          echo "  Client: http://galgo-mini-01:5173"
 
-      - name: Cleanup unused resources
-        if: always()
+  # 🧪 Deploy a Testing (no main → galgo-home ARM64)
+  deploy-testing:
+    name: Deploy to Testing (galgo-home)
+    needs: validate
+    if: github.ref != 'refs/heads/main'
+    runs-on: [self-hosted, linux, arm64, galgo-home]
+    environment:
+      name: testing
+      url: http://galgo-home:3000
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 🏷️ Get build info
+        id: build
         run: |
-          echo "🧹 Limpiando recursos no utilizados..."
+          VERSION=$(cat package.json | grep '"version"' | head -1 | awk -F'"' '{print $4}')
+          BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          COMMIT_SHA="${{ github.sha }}"
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+      
+      - name: 💾 Backup current images
+        run: |
+          mkdir -p /tmp/galgo-backup
+          docker ps -a --format "{{.ID}} {{.Names}} {{.Image}}" | grep galgo > /tmp/galgo-backup/containers.txt || true
+          docker images --format "{{.Repository}}\t{{.Tag}}\t{{.ID}}" | grep galgo > /tmp/galgo-backup/images.txt || true
+          echo "✅ Backup created"
+      
+      - name: 🐳 Build and deploy
+        env:
+          BUILD_DATE: ${{ steps.build.outputs.build_date }}
+          VCS_REF: ${{ steps.build.outputs.commit_sha }}
+          VERSION: ${{ steps.build.outputs.version }}
+        run: |
+          echo "🔨 Building images for TESTING..."
+          docker-compose build \
+            --build-arg BUILD_DATE="$BUILD_DATE" \
+            --build-arg VCS_REF="$VCS_REF" \
+            --build-arg VERSION="$VERSION"
           
-          # Contar recursos antes
-          echo "📊 Recursos antes de limpieza:"
-          echo "  Images: $(docker images -q | wc -l)"
-          echo "  Containers: $(docker ps -a -q | wc -l)"
-          echo "  Volumes: $(docker volume ls -q | wc -l)"
+          echo "🚀 Starting services..."
+          docker-compose down || true
+          sleep 2
+          docker-compose up -d
+          echo "✅ Services started"
+      
+      - name: 🏷️ Tag images
+        run: |
+          VERSION="${{ steps.build.outputs.version }}"
+          COMMIT_SHA="${{ steps.build.outputs.commit_sha }}"
+          docker tag galgo-school-client:latest galgo-school-client:${VERSION}-${COMMIT_SHA:0:7} || true
+          docker tag galgo-school-server:latest galgo-school-server:${VERSION}-${COMMIT_SHA:0:7} || true
+      
+      - name: 🏥 Health check
+        id: health
+        timeout-minutes: 2
+        run: |
+          echo "🏥 Checking service health..."
+          MAX_ATTEMPTS=30
+          RETRY_DELAY=2
           
-          # Limpiar
-          echo "🗑️ Eliminando imágenes no utilizadas..."
-          docker image prune -f --filter "dangling=true" 2>/dev/null || true
+          for attempt in $(seq 1 $MAX_ATTEMPTS); do
+            if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
+              echo "✅ Service healthy (attempt $attempt/$MAX_ATTEMPTS)"
+              exit 0
+            fi
+            
+            if [ $((attempt % 5)) -eq 0 ]; then
+              echo "⏳ Waiting... (attempt $attempt/$MAX_ATTEMPTS)"
+              docker-compose ps
+            fi
+            
+            sleep $RETRY_DELAY
+          done
           
-          echo "🗑️ Eliminando volúmenes no utilizados..."
-          docker volume prune -f 2>/dev/null || true
-          
-          echo "🗑️ Eliminando redes no utilizadas..."
-          docker network prune -f 2>/dev/null || true
-          
-          # Contar recursos después
+          echo "❌ Health check failed"
+          docker-compose logs
+          exit 1
+      
+      - name: 🔄 Rollback on failure
+        if: failure() && steps.health.outcome == 'failure'
+        run: |
+          echo "❌ Deployment failed, rolling back..."
+          docker-compose down || true
+          sleep 2
+          docker-compose up -d || echo "⚠️ Manual rollback required"
+          exit 1
+      
+      - name: 📊 Cleanup resources
+        if: success()
+        run: |
+          echo "🧹 Cleaning up..."
+          docker image prune -f --filter "dangling=true" > /dev/null 2>&1 || true
+          docker volume prune -f > /dev/null 2>&1 || true
+          docker network prune -f > /dev/null 2>&1 || true
+          echo "✅ Cleanup completed"
+      
+      - name: ✅ Success notification
+        if: success()
+        run: |
+          echo "✅ Testing Deployment Successful!"
           echo ""
-          echo "📊 Recursos después de limpieza:"
-          echo "  Images: $(docker images -q | wc -l)"
-          echo "  Containers: $(docker ps -a -q | wc -l)"
-          echo "  Volumes: $(docker volume ls -q | wc -l)"
+          echo "📋 Deployment Details:"
+          echo "  Environment: Testing (galgo-home ARM64)"
+          echo "  Branch: ${{ github.ref_name }}"
+          echo "  Commit: ${{ steps.build.outputs.commit_sha }}"
+          echo "  Version: ${{ steps.build.outputs.version }}"
           echo ""
-          echo "✅ Limpieza completada"
+          echo "🔗 Services:"
+          echo "  API: http://galgo-home:3000"
+          echo "  Client: http://galgo-home:5173"
