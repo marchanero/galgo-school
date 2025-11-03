@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 import toast, { Toaster } from 'react-hot-toast'
-import axios from 'axios'
 import Navbar from './components/Navbar'
 import SensorManagement from './components/SensorManagement'
 import MqttConnectionStatus from './components/MqttConnectionStatus'
@@ -9,13 +8,8 @@ import RTSPCameraGallery from './components/RTSPCameraGallery'
 import { useFormValidation, validationRules } from './hooks/useFormValidation'
 import { usePersistedConfig } from './hooks/usePersistedConfig'
 import { 
-  validateIPv4, 
-  validatePort, 
-  validateRTSPUrl, 
-  validateHostname,
   validateCameraConfig,
-  validateMQTTConfig,
-  formatValidationErrors 
+  validateMQTTConfig
 } from './utils/validators'
 
 // API URL - use environment variable for Docker deployment
@@ -32,7 +26,6 @@ function App() {
   const [pausedTime, setPausedTime] = useState(0)
   const [theme, setTheme] = useState('light')
   const [recordingAutoStart, setRecordingAutoStart] = useState(false)
-  const [error, setError] = useState(null)
 
   // MQTT Topics and Sensors Management
   const [mqttTopics, setMqttTopics] = useState([])
@@ -43,8 +36,6 @@ function App() {
   
   // Search/filter states for lists
   const [searchCameras, setSearchCameras] = useState('')
-  const [searchSensors, setSearchSensors] = useState('')
-  const [searchMqttTopics, setSearchMqttTopics] = useState('')
 
   // Configurations state with persistence
   const defaultConfigurations = {
@@ -88,10 +79,7 @@ function App() {
 
   const {
     state: configurations,
-    setState: setConfigurations,
-    hasUnsavedChanges,
-    isSaving,
-    saveToServer: saveConfigToServer
+    setState: setConfigurations
   } = usePersistedConfig('appConfigurations', defaultConfigurations, API_URL, toast)
 
   // MQTT Status - Simplified state management
@@ -541,7 +529,7 @@ function App() {
 
   const fetchSensors = async () => {
     setLoading(true)
-    setError(null)
+    // setError(null)
     try {
       const response = await fetch(`${API_URL}/api/sensors`)
       if (!response.ok) {
@@ -551,7 +539,7 @@ function App() {
       setSensors(data.sensors || [])
     } catch (error) {
       console.error('Error fetching sensors:', error)
-      setError('Failed to load sensors')
+      // setError('Failed to load sensors')
       toast.error('Error al cargar sensores', { duration: 3000 })
     } finally {
       setLoading(false)
@@ -564,7 +552,7 @@ function App() {
       const response = await fetch(`${API_URL}/api/sensors/types`)
       if (response.ok) {
         const data = await response.json()
-        setSensorTypes(data.types || [])
+        // setSensorTypes(data.types || [])
       }
     } catch (error) {
       console.error('Error fetching sensor types:', error)
@@ -687,7 +675,7 @@ function App() {
     }
 
     setLoading(true)
-    setError(null)
+    // setError(null)
 
     // Prepare sensor data in the format expected by the backend
     let sensorData = { ...sensorForm.values }
@@ -1032,21 +1020,21 @@ function App() {
           duration: 3000,
           icon: '🔌'
         })
-        setError('')
+        // setError('')
       } else {
         const errorData = await response.json()
         toast.dismiss(loadingToast)
         toast.error(`Error al desconectar: ${errorData.error || 'Error desconocido'}`, {
           duration: 5000
         })
-        setError(errorData.error || 'Error disconnecting from MQTT')
+        // setError(errorData.error || 'Error disconnecting from MQTT')
       }
     } catch (error) {
       toast.dismiss(loadingToast)
       toast.error('Error desconectando del broker MQTT', {
         duration: 5000
       })
-      setError('Error disconnecting from MQTT broker')
+      // setError('Error disconnecting from MQTT broker')
       console.error('MQTT disconnect error:', error)
     } finally {
       setMqttLoading(false)
@@ -1083,21 +1071,21 @@ function App() {
           duration: 3000,
           icon: '📡'
         })
-        setError('')
+        // setError('')
       } else {
         const errorData = await response.json()
         toast.dismiss(loadingToast)
         toast.error(`Error al agregar topic: ${errorData.error || 'Error desconocido'}`, {
           duration: 5000
         })
-        setError(errorData.error || 'Error adding topic')
+        // setError(errorData.error || 'Error adding topic')
       }
     } catch (error) {
       toast.dismiss(loadingToast)
       toast.error('Error agregando topic MQTT', {
         duration: 5000
       })
-      setError('Error adding MQTT topic')
+      // setError('Error adding MQTT topic')
       console.error('Add topic error:', error)
     } finally {
       setMqttLoading(false)
