@@ -315,3 +315,42 @@ jobs:
             docker compose logs --tail=50
             exit 1
           fi
+
+      - name: Deployment Success Notification
+        if: success()
+        run: |
+          echo ""
+          echo "╔════════════════════════════════════════╗"
+          echo "║  ✅ DEPLOYMENT COMPLETED SUCCESSFULLY  ║"
+          echo "╚════════════════════════════════════════╝"
+          echo ""
+          echo "📌 Deployment Details:"
+          echo "   Version: ${{ steps.build-info.outputs.version }}"
+          echo "   Commit: ${{ steps.build-info.outputs.commit_sha }}"
+          echo "   Branch: ${{ steps.build-info.outputs.branch }}"
+          echo "   Timestamp: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "🎯 Services Status: ALL HEALTHY ✅"
+          echo ""
+          echo "📞 You can notify team members about successful deployment"
+
+      - name: Deployment Failure Notification
+        if: failure()
+        run: |
+          echo ""
+          echo "╔════════════════════════════════════════╗"
+          echo "║  ❌ DEPLOYMENT FAILED                  ║"
+          echo "╚════════════════════════════════════════╝"
+          echo ""
+          echo "📌 Failed Deployment Details:"
+          echo "   Version: ${{ steps.build-info.outputs.version }}"
+          echo "   Commit: ${{ steps.build-info.outputs.commit_sha }}"
+          echo "   Branch: ${{ steps.build-info.outputs.branch }}"
+          echo "   Timestamp: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "📋 Actions Taken:"
+          echo "   - Attempted automatic rollback"
+          echo "   - Checked service health"
+          echo ""
+          echo "⚠️ MANUAL INTERVENTION REQUIRED"
+          echo "   Please check the workflow logs for details"
