@@ -40,7 +40,11 @@ const options = {
       },
       {
         name: 'Cameras',
-        description: 'Gestión de cámaras RTSP',
+        description: 'Gestión de cámaras RTSP (Legacy)',
+      },
+      {
+        name: 'RTSP Cameras',
+        description: 'Gestión completa de cámaras RTSP con múltiples configuraciones',
       },
       {
         name: 'Health',
@@ -141,6 +145,119 @@ const options = {
             created_at: {
               type: 'string',
               format: 'date-time',
+            },
+          },
+        },
+        RTSPCamera: {
+          type: 'object',
+          required: ['name', 'ip'],
+          properties: {
+            id: {
+              type: 'integer',
+              description: 'ID único de la cámara RTSP',
+            },
+            name: {
+              type: 'string',
+              description: 'Nombre único de la cámara',
+              example: 'Cámara Entrada Principal',
+            },
+            ip: {
+              type: 'string',
+              description: 'Dirección IP o hostname de la cámara',
+              example: '192.168.1.100',
+            },
+            port: {
+              type: 'integer',
+              default: 554,
+              description: 'Puerto RTSP de la cámara',
+              example: 554,
+            },
+            username: {
+              type: 'string',
+              description: 'Usuario para autenticación RTSP (opcional)',
+              example: 'admin',
+            },
+            password: {
+              type: 'string',
+              description: 'Contraseña para autenticación RTSP (opcional)',
+            },
+            path: {
+              type: 'string',
+              default: '/',
+              description: 'Ruta del stream RTSP',
+              example: '/stream1',
+            },
+            protocol: {
+              type: 'string',
+              default: 'rtsp',
+              enum: ['rtsp', 'rtsps'],
+              description: 'Protocolo de streaming',
+            },
+            enabled: {
+              type: 'boolean',
+              default: true,
+              description: 'Si la cámara está habilitada',
+            },
+            last_connection_status: {
+              type: 'string',
+              enum: ['connected', 'disconnected', 'testing', 'error', 'unknown'],
+              description: 'Último estado de conexión',
+            },
+            last_connection_time: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Última vez que se intentó conectar',
+            },
+            created_at: {
+              type: 'string',
+              format: 'date-time',
+            },
+            updated_at: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
+        StreamInfo: {
+          type: 'object',
+          properties: {
+            video_codec: {
+              type: 'string',
+              example: 'H.264',
+            },
+            audio_codec: {
+              type: 'string',
+              example: 'AAC',
+            },
+            resolution: {
+              type: 'string',
+              example: '1920x1080',
+            },
+            fps: {
+              type: 'string',
+              example: '30',
+            },
+          },
+        },
+        TestConnectionResult: {
+          type: 'object',
+          properties: {
+            success: {
+              type: 'boolean',
+            },
+            connection_status: {
+              type: 'string',
+              enum: ['connected', 'error', 'testing'],
+            },
+            rtsp_url: {
+              type: 'string',
+              example: 'rtsp://admin:password@192.168.1.100:554/stream1',
+            },
+            stream_info: {
+              $ref: '#/components/schemas/StreamInfo',
+            },
+            message: {
+              type: 'string',
             },
           },
         },
