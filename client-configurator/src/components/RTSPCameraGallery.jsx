@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import VideoPreview from './VideoPreview';
-import { useRTSPAutoReconnect } from '../hooks/useRTSPAutoReconnect';
 import toast from 'react-hot-toast';
 
 /**
@@ -17,7 +16,7 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
   const [streamStatus, setStreamStatus] = useState({});
 
   // Cargar cámaras desde props o API
-  const loadCameras = async () => {
+  const loadCameras = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -56,46 +55,62 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
     } finally {
       setLoading(false);
     }
-  };
+  }, [apiUrl, configuredCameras, cameraConfig, activeCameraId]);
 
   useEffect(() => {
     loadCameras();
-  }, [apiUrl, configuredCameras, cameraConfig]);
+  }, [loadCameras]);
 
-  // Iniciar streaming para una cámara
-  const startStreamPreview = async (cameraId) => {
-    try {
-      const response = await fetch(`${apiUrl}/api/stream/preview/${cameraId}`, {
-        method: 'POST',
-      });
-      if (!response.ok) throw new Error('Error iniciando stream');
-      const data = await response.json();
-      console.log('✅ Stream iniciado:', data);
-      toast.success(`Stream iniciado: ${data.message}`);
-      return data.hlsUrl;
-    } catch (err) {
-      console.error('Error iniciando stream:', err);
-      toast.error('Error al iniciar stream');
-      throw err;
+  // Iniciar streaming para una cámara con reintentos
+  const startStreamPreview = async (cameraId, maxRetries = 2) => {
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+      try {
+        console.log(`🔄 Intento ${attempt}/${maxRetries + 1} de iniciar stream para cámara ${cameraId}`);
+        const response = await fetch(`${apiUrl}/api/stream/preview/${cameraId}`, {
+          method: 'POST',
+        });
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+        const data = await response.json();
+        console.log('✅ Stream iniciado:', data);
+        toast.success(`Stream iniciado: ${data.message || 'Cámara conectada'}`);
+        return data.hlsUrl;
+      } catch (err) {
+        console.error(`❌ Error en intento ${attempt} para cámara ${cameraId}:`, err.message);
+        if (attempt <= maxRetries) {
+          const delay = attempt * 1000; // Delay creciente: 1s, 2s
+          console.log(`⏳ Esperando ${delay}ms antes del siguiente intento...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          toast.error(`Error al iniciar stream después de ${maxRetries + 1} intentos: ${err.message}`);
+          throw err;
+        }
+      }
     }
   };
 
   // Detener streaming
   const stopStreamPreview = async (cameraId) => {
     try {
+      console.log(`🛑 Deteniendo stream para cámara ${cameraId}`);
       const response = await fetch(`${apiUrl}/api/stream/preview/${cameraId}`, {
         method: 'DELETE',
       });
-      if (!response.ok) throw new Error('Error deteniendo stream');
-      console.log('✅ Stream detenido');
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      console.log('✅ Stream detenido exitosamente');
       toast.success('Stream detenido');
       setStreamStatus((prev) => ({
         ...prev,
         [cameraId]: { ...prev[cameraId], hlsUrl: null },
       }));
     } catch (err) {
-      console.error('Error deteniendo stream:', err);
-      toast.error('Error al detener stream');
+      console.error(`❌ Error deteniendo stream para cámara ${cameraId}:`, err.message);
+      toast.error(`Error al detener stream: ${err.message}`);
     }
   };
 
@@ -110,7 +125,7 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
   // Obtener cámara activa
   const activeCamera = cameras.find((c) => c.id === activeCameraId);
   const activeStreamStatus = streamStatus[activeCameraId];
-  const isStreaming = activeStreamStatus?.hlsUrl;
+  const activeHlsPath = activeStreamStatus?.hlsUrl;
 
   if (loading) {
     return (
@@ -156,7 +171,7 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
               {activeCamera.name}
             </h3>
             <div className="flex gap-2">
-              {!isStreaming ? (
+              {!activeHlsPath ? (
                 <button
                   onClick={() =>
                     startStreamPreview(activeCameraId).then((hlsUrl) => {
@@ -194,11 +209,11 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
             </div>
           </div>
 
-          {isStreaming ? (
+          {activeHlsPath ? (
             <VideoPreview
               cameraId={activeCameraId}
               cameraName={activeCamera.name}
-              hlsUrl={`${apiUrl}${isStreaming}`}
+              hlsUrl={new URL(activeHlsPath, apiUrl).href}
               onStatusChange={(status) => handleCameraStatusChange(activeCameraId, status)}
               showControls={true}
               autoPlay={true}
