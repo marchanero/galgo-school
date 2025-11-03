@@ -25,33 +25,39 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
 
       // Si hay cámaras configuradas en props, usarlas
       if (configuredCameras && configuredCameras.length > 0) {
+        console.log(`📹 Cargando ${configuredCameras.length} cámaras configuradas...`);
         loadedCameras = configuredCameras.map(cam => ({
           id: cam.id,
           name: cam.name,
           ip: cam.ip,
           port: cam.port || 554,
-          username: cam.username,
-          password: cam.password,
+          username: cam.username || '',
+          password: cam.password || '',
+          path: cam.path || '/stream',
           rtspUrl: `rtsp://${cam.username}${cam.password ? ':' + cam.password : ''}${cam.username ? '@' : ''}${cam.ip}:${cam.port}${cam.path || '/stream'}`,
           connectionTimeout: cameraConfig?.connectionTimeout || 10,
           autoReconnect: cameraConfig?.autoReconnect !== false
         }));
+        console.log('✅ Cámaras cargadas desde props:', loadedCameras);
       } else {
         // Si no hay props, intentar cargar del API
+        console.log('🔄 Intentando cargar cámaras del API...');
         const response = await fetch(`${apiUrl}/api/cameras`);
-        if (!response.ok) throw new Error('No se pudieron cargar las cámaras');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         loadedCameras = data;
+        console.log('✅ Cámaras cargadas del API:', loadedCameras);
       }
 
       setCameras(loadedCameras);
       if (loadedCameras.length > 0 && !activeCameraId) {
         setActiveCameraId(loadedCameras[0].id);
+        console.log(`📌 Cámara activa seleccionada: ${loadedCameras[0].name}`);
       }
     } catch (err) {
-      console.error('Error cargando cámaras:', err);
+      console.error('❌ Error cargando cámaras:', err);
       setError(err.message);
-      toast.error('Error al cargar cámaras');
+      toast.error(`Error al cargar cámaras: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -63,28 +69,61 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
 
   // Iniciar streaming para una cámara con reintentos
   const startStreamPreview = async (cameraId, maxRetries = 2) => {
+    const camera = cameras.find(c => c.id === cameraId);
+    if (!camera) {
+      toast.error(`❌ Cámara no encontrada`);
+      return;
+    }
+
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
       try {
-        console.log(`🔄 Intento ${attempt}/${maxRetries + 1} de iniciar stream para cámara ${cameraId}`);
+        console.log(`🔄 Intento ${attempt}/${maxRetries + 1} - Iniciando stream para cámara "${camera.name}" (${camera.ip}:${camera.port})`);
+        setStreamStatus(prev => ({
+          ...prev,
+          [cameraId]: { status: 'connecting', hlsUrl: null, error: null, attempt }
+        }));
+
         const response = await fetch(`${apiUrl}/api/stream/preview/${cameraId}`, {
           method: 'POST',
         });
+
         if (!response.ok) {
           const errorText = await response.text();
           throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
+
         const data = await response.json();
-        console.log('✅ Stream iniciado:', data);
-        toast.success(`Stream iniciado: ${data.message || 'Cámara conectada'}`);
+        console.log(`✅ Stream iniciado exitosamente para ${camera.name}:`, data);
+        setStreamStatus(prev => ({
+          ...prev,
+          [cameraId]: { status: 'connected', hlsUrl: data.hlsUrl, error: null }
+        }));
+        toast.success(`✅ Stream de "${camera.name}" iniciado correctamente`);
         return data.hlsUrl;
       } catch (err) {
-        console.error(`❌ Error en intento ${attempt} para cámara ${cameraId}:`, err.message);
+        console.error(`❌ Intento ${attempt} fallido para ${camera.name}:`, err.message);
+        
         if (attempt <= maxRetries) {
           const delay = attempt * 1000; // Delay creciente: 1s, 2s
           console.log(`⏳ Esperando ${delay}ms antes del siguiente intento...`);
+          setStreamStatus(prev => ({
+            ...prev,
+            [cameraId]: { 
+              status: 'retrying', 
+              hlsUrl: null, 
+              error: `Reintentando... (${attempt}/${maxRetries + 1})`,
+              attempt
+            }
+          }));
           await new Promise(resolve => setTimeout(resolve, delay));
         } else {
-          toast.error(`Error al iniciar stream después de ${maxRetries + 1} intentos: ${err.message}`);
+          const errorMsg = `No se pudo iniciar stream después de ${maxRetries + 1} intentos: ${err.message}`;
+          console.error(`❌ ${errorMsg}`);
+          setStreamStatus(prev => ({
+            ...prev,
+            [cameraId]: { status: 'error', hlsUrl: null, error: errorMsg }
+          }));
+          toast.error(errorMsg);
           throw err;
         }
       }
@@ -157,6 +196,16 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
         </svg>
         <p className="text-blue-800 dark:text-blue-200 font-medium">Sin cámaras configuradas</p>
         <p className="text-sm text-blue-600 dark:text-blue-300 mt-1">Agrega cámaras RTSP en la sección de configuración</p>
+        <div className="mt-4 text-xs text-blue-500 dark:text-blue-400 bg-blue-100/50 dark:bg-blue-900/50 p-3 rounded">
+          <p>💡 <strong>Tip:</strong> Accede a <strong>Configuración → Cámaras RTSP</strong> y haz clic en <strong>"Agregar Cámara"</strong></p>
+          <p className="mt-2">Necesitarás:</p>
+          <ul className="list-disc list-inside text-left mt-1 ml-2">
+            <li>IP de la cámara (ej: 192.168.1.100)</li>
+            <li>Puerto RTSP (típicamente 554)</li>
+            <li>Usuario y contraseña (si aplica)</li>
+            <li>Ruta del stream (típicamente /stream)</li>
+          </ul>
+        </div>
       </div>
     );
   }
@@ -231,19 +280,35 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
               <span className="font-mono text-gray-900 dark:text-white">{activeCamera.ip}:{activeCamera.port}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600 dark:text-gray-400">Estado:</span>
-              <span className={`font-semibold ${
-                activeStreamStatus?.status === 'connected' ? 'text-green-600' :
-                activeStreamStatus?.status === 'connecting' ? 'text-yellow-600' :
-                'text-red-600'
-              }`}>
-                {activeStreamStatus?.status || 'Inactivo'}
-              </span>
+              <span className="text-gray-600 dark:text-gray-400">Ruta RTSP:</span>
+              <span className="font-mono text-gray-900 dark:text-white text-xs">{activeCamera.path || '/stream'}</span>
             </div>
-            {activeStreamStatus?.error && (
+            <div className="flex justify-between items-center">
+              <span className="text-gray-600 dark:text-gray-400">Estado:</span>
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full animate-pulse ${
+                  activeStreamStatus?.status === 'connected' ? 'bg-green-500' :
+                  activeStreamStatus?.status === 'connecting' || activeStreamStatus?.status === 'retrying' ? 'bg-yellow-500' :
+                  'bg-red-500'
+                }`}></span>
+                <span className={`font-semibold ${
+                  activeStreamStatus?.status === 'connected' ? 'text-green-600 dark:text-green-400' :
+                  activeStreamStatus?.status === 'connecting' ? 'text-yellow-600 dark:text-yellow-400' :
+                  activeStreamStatus?.status === 'retrying' ? 'text-orange-600 dark:text-orange-400' :
+                  'text-red-600 dark:text-red-400'
+                }`}>
+                  {activeStreamStatus?.status === 'connected' && '🟢 Conectado'}
+                  {activeStreamStatus?.status === 'connecting' && '🟡 Conectando...'}
+                  {activeStreamStatus?.status === 'retrying' && `🔄 ${activeStreamStatus.error}`}
+                  {activeStreamStatus?.status === 'error' && '🔴 Error'}
+                  {!activeStreamStatus?.status && '⚫ Inactivo'}
+                </span>
+              </div>
+            </div>
+            {activeStreamStatus?.error && activeStreamStatus?.status !== 'retrying' && (
               <div className="flex justify-between">
                 <span className="text-gray-600 dark:text-gray-400">Error:</span>
-                <span className="text-red-600 text-right">{activeStreamStatus.error}</span>
+                <span className="text-red-600 dark:text-red-400 text-right text-xs max-w-xs">{activeStreamStatus.error}</span>
               </div>
             )}
           </div>
