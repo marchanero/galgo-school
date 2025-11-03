@@ -102,6 +102,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Get build information
+        id: build-info
+        run: |
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_DATE=$(git log -1 --format=%aI)
+          VERSION=$(git describe --tags --always 2>/dev/null || echo "latest")
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "commit_date=$COMMIT_DATE" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          
+          echo "📌 Build Information:"
+          echo "  SHA: $COMMIT_SHA"
+          echo "  Date: $COMMIT_DATE"
+          echo "  Version: $VERSION"
+          echo "  Branch: $BRANCH"
+
       - name: Stop existing containers
         run: docker compose down || true
 
@@ -112,11 +131,40 @@ jobs:
           docker rmi galgo-client:latest || true
           echo "✅ Imágenes antiguas eliminadas"
 
-      - name: Build and start services
+      - name: Build and start services with version tags
+        env:
+          BUILD_DATE: ${{ steps.build-info.outputs.commit_date }}
+          VCS_REF: ${{ steps.build-info.outputs.commit_sha }}
+          VERSION: ${{ steps.build-info.outputs.version }}
         run: |
-          echo "🔨 Construyendo e iniciando servicios..."
-          docker compose up -d --build
+          echo "🔨 Construyendo servicios..."
+          echo "  Version: $VERSION"
+          echo "  Commit: $VCS_REF"
+          echo "  Date: $BUILD_DATE"
+          
+          # Build con argumentos de versión
+          docker compose build \
+            --build-arg BUILD_DATE="$BUILD_DATE" \
+            --build-arg VCS_REF="$VCS_REF" \
+            --build-arg VERSION="$VERSION"
+          
+          echo "🚀 Iniciando servicios..."
+          docker compose up -d
           echo "✅ Servicios iniciados"
+
+      - name: Tag images with version
+        run: |
+          VERSION="${{ steps.build-info.outputs.version }}"
+          COMMIT_SHA="${{ steps.build-info.outputs.commit_sha }}"
+          
+          echo "🏷️ Tagging images..."
+          docker tag galgo-server:latest "galgo-server:$VERSION" || true
+          docker tag galgo-server:latest "galgo-server:$COMMIT_SHA" || true
+          docker tag galgo-client:latest "galgo-client:$VERSION" || true
+          docker tag galgo-client:latest "galgo-client:$COMMIT_SHA" || true
+          
+          echo "✅ Images tagged:"
+          docker images | grep galgo
 
       - name: Show running containers
         run: |
@@ -200,6 +248,15 @@ jobs:
           echo "════════════════════════════════════════"
           echo "📦 Contenedores activos:"
           docker compose ps --format "table {{.Names}}\t{{.Status}}"
+          echo ""
+          echo "🏷️ Imágenes desplegadas:"
+          docker images | grep galgo | head -10
+          echo ""
+          echo "📋 Build Information:"
+          echo "  Version: ${{ steps.build-info.outputs.version }}"
+          echo "  Commit: ${{ steps.build-info.outputs.commit_sha }}"
+          echo "  Branch: ${{ steps.build-info.outputs.branch }}"
+          echo "  Date: ${{ steps.build-info.outputs.commit_date }}"
           echo ""
           echo "🔗 Servicios disponibles:"
           echo "  - API: http://localhost:3000"
