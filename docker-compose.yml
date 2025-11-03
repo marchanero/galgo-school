@@ -24,7 +24,7 @@ services:
 
   galgo-client:
     build:
-      context: ./client
+      context: ./client-configurator
       dockerfile: Dockerfile
       args:
         - VITE_API_URL=http://localhost:3001

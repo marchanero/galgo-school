@@ -57,7 +57,7 @@ NODE_ENV=development
 PORT=3001
 ```
 
-**client/.env.local:**
+**client-configurator/.env.local:**
 ```
 VITE_API_URL=http://localhost:3001
 ```
@@ -354,7 +354,7 @@ router.use('/mi', require('./mi.routes'))
 **5. Usar en frontend:**
 
 ```javascript
-// client/src/App.jsx
+// client-configurator/src/App.jsx
 const handleAction = async () => {
   try {
     const response = await fetch(`${API_URL}/api/mi/action`, {
@@ -378,7 +378,7 @@ const handleAction = async () => {
 **1. Crear componente:**
 
 ```jsx
-// client/src/components/MiComponente.jsx
+// client-configurator/src/components/MiComponente.jsx
 import { useState } from 'react'
 import toast from 'react-hot-toast'
 
@@ -408,7 +408,7 @@ export default MiComponente
 **2. Importar en App:**
 
 ```jsx
-// client/src/App.jsx
+// client-configurator/src/App.jsx
 import MiComponente from './components/MiComponente'
 
 function App() {
@@ -423,7 +423,7 @@ function App() {
 **1. Definir regla:**
 
 ```javascript
-// client/src/hooks/useFormValidation.js
+// client-configurator/src/hooks/useFormValidation.js
 const validationRules = {
   // ...
   custom: (message) => (value) => {

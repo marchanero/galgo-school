@@ -4,7 +4,19 @@ import axios from 'axios'
 import Navbar from './components/Navbar'
 import SensorManagement from './components/SensorManagement'
 import MqttConnectionStatus from './components/MqttConnectionStatus'
+import RTSPManager from './components/RTSPManager'
+import RTSPCameraGallery from './components/RTSPCameraGallery'
 import { useFormValidation, validationRules } from './hooks/useFormValidation'
+import { usePersistedConfig } from './hooks/usePersistedConfig'
+import { 
+  validateIPv4, 
+  validatePort, 
+  validateRTSPUrl, 
+  validateHostname,
+  validateCameraConfig,
+  validateMQTTConfig,
+  formatValidationErrors 
+} from './utils/validators'
 
 // API URL - use environment variable for Docker deployment
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3001'
@@ -28,9 +40,14 @@ function App() {
   // Camera IPs state
   const [cameraIPs, setCameraIPs] = useState([])
   const [newCameraIP, setNewCameraIP] = useState({ name: '', ip: '', port: '554', username: '', password: '' })
+  
+  // Search/filter states for lists
+  const [searchCameras, setSearchCameras] = useState('')
+  const [searchSensors, setSearchSensors] = useState('')
+  const [searchMqttTopics, setSearchMqttTopics] = useState('')
 
-  // Configurations state
-  const [configurations, setConfigurations] = useState({
+  // Configurations state with persistence
+  const defaultConfigurations = {
     general: {
       theme: 'light',
       recordingAutoStart: false,
@@ -67,7 +84,15 @@ function App() {
       bufferSize: 5,
       cameraIPs: []
     }
-  })
+  }
+
+  const {
+    state: configurations,
+    setState: setConfigurations,
+    hasUnsavedChanges,
+    isSaving,
+    saveToServer: saveConfigToServer
+  } = usePersistedConfig('appConfigurations', defaultConfigurations, API_URL, toast)
 
   // MQTT Status - Simplified state management
   const [mqttStatus, setMqttStatus] = useState({
@@ -437,22 +462,68 @@ function App() {
     return () => clearInterval(interval)
   }, [configurations.mqtt.autoPolling?.enabled, configurations.mqtt.autoPolling?.messagesInterval])
 
-  // Load camera IPs from localStorage on mount (temporary, will be moved to API)
+  // Load camera IPs from localStorage and sync with configurations on mount
   useEffect(() => {
     const savedIPs = localStorage.getItem('galgo-camera-ips')
     if (savedIPs) {
       try {
-        setCameraIPs(JSON.parse(savedIPs))
+        const ips = JSON.parse(savedIPs)
+        setCameraIPs(ips)
+        // Sincronizar con configurations
+        setConfigurations(prev => ({
+          ...prev,
+          cameras: {
+            ...prev.cameras,
+            cameraIPs: ips
+          }
+        }))
       } catch (error) {
         console.error('Error loading camera IPs:', error)
       }
     }
   }, [])
 
-  // Save camera IPs to localStorage whenever they change (temporary)
+  // Sincronizar camera IPs con localStorage y configurations
   useEffect(() => {
     localStorage.setItem('galgo-camera-ips', JSON.stringify(cameraIPs))
+    // Sincronizar con configurations.cameras.cameraIPs
+    setConfigurations(prev => ({
+      ...prev,
+      cameras: {
+        ...prev.cameras,
+        cameraIPs: cameraIPs
+      }
+    }))
   }, [cameraIPs])
+
+  // Polling del estado de conexión MQTT cuando estamos en la tab de MQTT
+  useEffect(() => {
+    if (configTab !== 'mqtt') return
+
+    const pollMQTTStatus = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/mqtt/status`)
+        if (response.ok) {
+          const data = await response.json()
+          setMqttStatus(prev => ({
+            ...prev,
+            connected: data.connected || false,
+            broker: data.broker || 'Sin conectar',
+            clientId: data.clientId || '',
+            lastChecked: new Date().toISOString()
+          }))
+        }
+      } catch (error) {
+        console.error('Error polling MQTT status:', error)
+      }
+    }
+
+    // Poll immediately and then every 5 seconds
+    pollMQTTStatus()
+    const interval = setInterval(pollMQTTStatus, 5000)
+
+    return () => clearInterval(interval)
+  }, [configTab])
 
   const [elapsedTime, setElapsedTime] = useState(0)
 
@@ -817,7 +888,28 @@ function App() {
 
   // MQTT Connection Functions
   const handleConnect = async () => {
+    // Validate configuration before connecting
+    const validation = validateMQTTConfig({
+      host: configurations.mqtt.host,
+      port: configurations.mqtt.port,
+      username: configurations.mqtt.username,
+      password: configurations.mqtt.password,
+      ssl: configurations.mqtt.ssl
+    })
+
+    if (!validation.valid) {
+      const errorMessage = Object.entries(validation.errors)
+        .map(([field, error]) => `${field}: ${error}`)
+        .join('\n')
+      toast.error(`⚠️ Configuración inválida:\n${errorMessage}`, {
+        duration: 5000,
+        icon: '❌'
+      })
+      return
+    }
+
     setMqttConnecting(true)
+    const toastId = toast.loading('🔗 Conectando al broker MQTT...', { duration: 30000 })
 
     try {
       // Build MQTT broker URL
@@ -825,11 +917,6 @@ function App() {
       const brokerUrl = `${protocol}://${configurations.mqtt.host}:${configurations.mqtt.port}`
 
       console.log(`Connecting to MQTT broker: ${brokerUrl}`)
-      console.log('Host:', configurations.mqtt.host)
-      console.log('Port:', configurations.mqtt.port)
-      console.log('Username:', configurations.mqtt.username)
-      console.log('Password:', configurations.mqtt.password ? '***' : 'empty')
-      console.log('SSL:', configurations.mqtt.ssl)
 
       const requestBody = {
         broker: brokerUrl,
@@ -837,11 +924,6 @@ function App() {
         password: configurations.mqtt.password || undefined,
         ssl: configurations.mqtt.ssl
       }
-
-      console.log('Request body:', JSON.stringify(requestBody, (key, value) => {
-        if (key === 'password') return value ? '***' : undefined
-        return value
-      }))
 
       const response = await fetch(`${API_URL}/api/mqtt/connect`, {
         method: 'POST',
@@ -856,9 +938,14 @@ function App() {
           ...prev,
           connected: true,
           broker: brokerUrl,
+          clientId: data.clientId || '',
           lastChecked: new Date().toISOString()
         }))
-        toast.success('Conectado exitosamente al broker MQTT', { duration: 3000 })
+        toast.success(`✅ Conectado exitosamente a ${configurations.mqtt.host}:${configurations.mqtt.port}`, { 
+          id: toastId,
+          duration: 3000,
+          icon: '🔗'
+        })
       } else {
         throw new Error(data.message || 'Error al conectar')
       }
@@ -869,7 +956,11 @@ function App() {
         connected: false,
         lastChecked: new Date().toISOString()
       }))
-      toast.error(`Error de conexión MQTT: ${error.message}`, { duration: 5000 })
+      toast.error(`❌ Error de conexión MQTT: ${error.message}`, { 
+        id: toastId,
+        duration: 5000,
+        icon: '🚫'
+      })
     } finally {
       setMqttConnecting(false)
     }
@@ -877,6 +968,7 @@ function App() {
 
   const handleDisconnect = async () => {
     setMqttConnecting(true)
+    const toastId = toast.loading('🔌 Desconectando del broker...', { duration: 30000 })
 
     try {
       const response = await fetch(`${API_URL}/api/mqtt/disconnect`, {
@@ -889,7 +981,11 @@ function App() {
           connected: false,
           lastChecked: new Date().toISOString()
         }))
-        toast.success('Desconectado del broker MQTT', { duration: 3000 })
+        toast.success('✅ Desconectado del broker MQTT', { 
+          id: toastId,
+          duration: 3000,
+          icon: '🔌'
+        })
       } else {
         const errorData = await response.json()
         throw new Error(errorData.message || 'Error al desconectar')
@@ -1019,8 +1115,105 @@ function App() {
     }))
   }
 
-  const saveAllConfigurations = async () => {
+  // Validar y actualizar configuración MQTT con validación robusta
+  const updateMQTTConfiguration = (field, value) => {
+    // Get the current MQTT config with the new value
+    const updatedMqtt = {
+      ...configurations.mqtt,
+      [field]: value
+    }
+
+    // Only validate critical fields
+    if (['host', 'port', 'username', 'password'].includes(field)) {
+      const validation = validateMQTTConfig(updatedMqtt)
+
+      if (!validation.valid) {
+        const errorMessage = Object.entries(validation.errors)
+          .map(([fieldName, error]) => `${fieldName}: ${error}`)
+          .join('\n')
+        
+        toast.error(`⚠️ Validación MQTT fallida:\n${errorMessage}`, {
+          duration: 5000,
+          icon: '❌'
+        })
+        return false
+      }
+    }
+
+    // Show confirmation if changing critical fields and connection exists
+    if ((field === 'host' || field === 'port') && mqttStatus.connected) {
+      const confirmed = window.confirm(
+        `⚠️ Atención!\n\nEstá cambiando ${field === 'host' ? 'el host' : 'el puerto'} del broker.\n\n¿Está seguro? Esto puede desconectar la sesión actual.`
+      )
+      if (!confirmed) return false
+    }
+
+    // If validation passes (or not needed), update the configuration
+    updateConfiguration('mqtt', field, value)
+    
+    // Show success feedback for critical field changes
+    if (['host', 'port'].includes(field)) {
+      const fieldLabel = field === 'host' ? 'Host del broker' : 'Puerto MQTT'
+      toast.success(`✅ ${fieldLabel} actualizado`, {
+        duration: 2000,
+        icon: '🔧'
+      })
+    }
+
+    return true
+  }
+
+  // Aplicar configuración predefinida de broker MQTT con validación
+  const applyMQTTPreset = (preset) => {
+    // Validate the preset configuration
+    const validation = validateMQTTConfig({
+      host: preset.host,
+      port: preset.port,
+      username: preset.username || '',
+      password: preset.password || '',
+      ssl: preset.ssl || false
+    })
+
+    if (!validation.valid) {
+      const errorMessage = Object.entries(validation.errors)
+        .map(([field, error]) => `${field}: ${error}`)
+        .join('\n')
+      toast.error(`⚠️ Validación de preset fallida:\n${errorMessage}`, {
+        duration: 5000,
+        icon: '❌'
+      })
+      return false
+    }
+
+    // Show confirmation if already connected (to avoid accidental disconnection)
+    if (mqttStatus.connected && mqttStatus.broker !== `mqtt://${preset.host}:${preset.port}`) {
+      const currentBroker = mqttStatus.broker || configurations.mqtt.defaultBroker
+      const confirmed = window.confirm(
+        `⚠️ Atención!\n\nEstá conectado a:\n${currentBroker}\n\n¿Desconectar y cambiar a:\n${preset.name} (${preset.host}:${preset.port})?`
+      )
+      if (!confirmed) return false
+    }
+
+    // Apply the preset configuration
+    updateConfiguration('mqtt', 'host', preset.host)
+    updateConfiguration('mqtt', 'port', preset.port)
+    updateConfiguration('mqtt', 'username', preset.username)
+    updateConfiguration('mqtt', 'password', preset.password)
+    updateConfiguration('mqtt', 'ssl', preset.ssl)
+    updateConfiguration('mqtt', 'defaultBroker', `${preset.name} (${preset.host}:${preset.port})`)
+
+    toast.success(`✅ Configuración "${preset.name}" aplicada`, { 
+      duration: 3000,
+      icon: '⚙️'
+    })
+    return true
+  }
+
+  const saveAllConfigurations = useCallback(async () => {
+    const toastId = toast.loading('💾 Guardando configuración...', { duration: 30000 })
+    
     try {
+      // Guardar en servidor
       const response = await fetch(`${API_URL}/api/configurations`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1028,15 +1221,23 @@ function App() {
       })
 
       if (response.ok) {
-        toast.success('Configuraciones guardadas exitosamente', { duration: 3000 })
+        toast.success('✅ Configuración guardada exitosamente', { 
+          id: toastId,
+          duration: 3000,
+          icon: '💾'
+        })
       } else {
         throw new Error('Failed to save configurations')
       }
     } catch (error) {
       console.error('Error saving configurations:', error)
-      toast.error('Error al guardar configuraciones', { duration: 5000 })
+      toast.error('❌ Error al guardar configuración', { 
+        id: toastId,
+        duration: 5000,
+        icon: '⚠️'
+      })
     }
-  }
+  }, [configurations])
 
   const handleThemeChange = (newTheme) => {
     setTheme(newTheme)
@@ -1050,19 +1251,40 @@ function App() {
 
   // Camera IP management functions
   const addCameraIP = () => {
-    if (!newCameraIP.name || !newCameraIP.ip) {
-      toast.error('Nombre e IP son requeridos', { duration: 3000 })
+    // Validar usando el validador centralizado
+    const validation = validateCameraConfig({
+      name: newCameraIP.name,
+      ip: newCameraIP.ip,
+      port: newCameraIP.port,
+      username: newCameraIP.username,
+      password: newCameraIP.password,
+      path: newCameraIP.path
+    })
+
+    if (!validation.valid) {
+      const errorMessage = Object.entries(validation.errors)
+        .map(([field, error]) => `${field}: ${error}`)
+        .join('\n')
+      
+      toast.error(`❌ Validación fallida:\n${errorMessage}`, { 
+        duration: 5000,
+        icon: '⚠️'
+      })
       return
     }
 
     const newCamera = {
       id: Date.now().toString(),
-      ...newCameraIP
+      ...newCameraIP,
+      port: String(newCameraIP.port) // Asegurar que es string
     }
 
     setCameraIPs(prev => [...prev, newCamera])
-    setNewCameraIP({ name: '', ip: '', port: '554', username: '', password: '' })
-    toast.success('IP de cámara agregada', { duration: 3000 })
+    setNewCameraIP({ name: '', ip: '', port: '554', username: '', password: '', path: '' })
+    toast.success('✅ Cámara RTSP agregada exitosamente', { 
+      duration: 3000,
+      icon: '📹'
+    })
   }
 
   const removeCameraIP = (id) => {
@@ -1071,10 +1293,48 @@ function App() {
   }
 
   const updateCameraIP = (id, updates) => {
+    // Get the camera to update
+    const cameraToUpdate = cameraIPs.find(c => c.id === id)
+    if (!cameraToUpdate) {
+      toast.error('❌ Cámara no encontrada', { duration: 3000 })
+      return
+    }
+
+    // Merge updates with existing camera data for validation
+    const updatedCamera = { ...cameraToUpdate, ...updates }
+
+    // Validate if any IP/port/auth fields are being updated
+    if (updates.ip || updates.port || updates.username !== undefined || updates.password !== undefined) {
+      const validation = validateCameraConfig({
+        name: updatedCamera.name,
+        ip: updatedCamera.ip,
+        port: updatedCamera.port || cameraToUpdate.port,
+        username: updatedCamera.username,
+        password: updatedCamera.password
+      })
+
+      if (!validation.valid) {
+        const errorMessage = Object.entries(validation.errors)
+          .map(([field, error]) => `${field}: ${error}`)
+          .join('\n')
+        toast.error(`⚠️ Validación fallida:\n${errorMessage}`, {
+          duration: 5000,
+          icon: '❌'
+        })
+        return
+      }
+    }
+
+    // If only updating name, no validation needed
     setCameraIPs(prev => prev.map(camera => 
       camera.id === id ? { ...camera, ...updates } : camera
     ))
-    toast.success('IP de cámara actualizada', { duration: 3000 })
+    
+    const updateType = updates.name ? 'nombre' : updates.ip ? 'IP' : updates.port ? 'puerto' : 'datos'
+    toast.success(`✅ Cámara actualizada (${updateType})`, { 
+      duration: 3000,
+      icon: '🎥'
+    })
   }
 
   const renderDataFields = (sensorType, form) => {
@@ -1680,6 +1940,8 @@ function App() {
                     { id: 'general', label: 'General', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
                     { id: 'sensors', label: 'Sensores', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
                     { id: 'cameras', label: 'Cámaras', icon: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z' },
+                    { id: 'rtsp', label: 'RTSP', icon: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z' },
+                    { id: 'camera-streaming', label: 'Cámaras Streaming', icon: 'M14.828 14.828a4 4 0 01-5.656 0M21 12a9 9 0 11-18 0 9 9 0 0118 0zM15 12a3 3 0 11-6 0 3 3 0 016 0z' },
                     { id: 'recordings', label: 'Grabaciones', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
                     { id: 'mqtt', label: 'MQTT', icon: 'M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' }
                   ].map((tab) => (
@@ -2205,51 +2467,70 @@ function App() {
 
                   {/* Lista de IPs guardadas */}
                   <div className="mb-6">
-                    <h4 className="font-medium text-gray-900 dark:text-white mb-3">IPs de Cámaras Guardadas</h4>
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-medium text-gray-900 dark:text-white">IPs de Cámaras Guardadas ({cameraIPs.length})</h4>
+                    </div>
+                    {cameraIPs.length > 0 && (
+                      <div className="mb-3">
+                        <input
+                          type="text"
+                          placeholder="🔍 Buscar por nombre o IP..."
+                          value={searchCameras}
+                          onChange={(e) => setSearchCameras(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+                        />
+                      </div>
+                    )}
                     {cameraIPs.length === 0 ? (
                       <p className="text-gray-500 dark:text-gray-400 text-center py-4">No hay IPs de cámaras guardadas</p>
                     ) : (
                       <div className="space-y-2 max-h-60 overflow-y-auto">
-                        {cameraIPs.map(camera => (
-                          <div key={camera.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
-                            <div className="flex-1">
-                              <div className="font-medium text-gray-900 dark:text-white">{camera.name}</div>
-                              <div className="text-sm text-gray-500 dark:text-gray-400">
-                                {camera.ip}:{camera.port}
-                                {camera.username && (
-                                  <span className="ml-2 text-blue-600 dark:text-blue-400">
-                                    (Usuario: {camera.username})
-                                  </span>
-                                )}
+                        {cameraIPs
+                          .filter(camera => 
+                            searchCameras === '' || 
+                            camera.name.toLowerCase().includes(searchCameras.toLowerCase()) ||
+                            camera.ip.includes(searchCameras)
+                          )
+                          .map(camera => (
+                            <div key={camera.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900 dark:text-white">{camera.name}</div>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
+                                  {camera.ip}:{camera.port}
+                                  {camera.username && (
+                                    <span className="ml-2 text-blue-600 dark:text-blue-400">
+                                      (Usuario: {camera.username})
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex space-x-2">
+                                <button
+                                  onClick={() => {
+                                    const newName = prompt('Nuevo nombre:', camera.name)
+                                    if (newName && newName.trim()) {
+                                      updateCameraIP(camera.id, { name: newName.trim() })
+                                    }
+                                  }}
+                                  className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                                  title="Editar nombre"
+                                >
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => removeCameraIP(camera.id)}
+                                  className="p-1.5 bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
+                                  title="Eliminar"
+                                >
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
                               </div>
                             </div>
-                            <div className="flex space-x-2">
-                              <button
-                                onClick={() => {
-                                  const newName = prompt('Nuevo nombre:', camera.name)
-                                  if (newName && newName.trim()) {
-                                    updateCameraIP(camera.id, { name: newName.trim() })
-                                  }
-                                }}
-                                className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-                                title="Editar nombre"
-                              >
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                              </button>
-                              <button
-                                onClick={() => removeCameraIP(camera.id)}
-                                className="p-1.5 bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
-                                title="Eliminar"
-                              >
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                          ))}
                       </div>
                     )}
                   </div>
@@ -2664,21 +2945,14 @@ function App() {
                             description: 'AWS IoT Core (requiere configuración)'
                           }
                         ].map((preset, index) => {
-                          const isDefault = configurations.mqtt.defaultBroker === preset.name
+                          const isDefault = configurations.mqtt.defaultBroker.includes(preset.name)
                           return (
                             <div key={index} className="relative">
                               <button
-                                onClick={() => {
-                                  updateConfiguration('mqtt', 'host', preset.host)
-                                  updateConfiguration('mqtt', 'port', preset.port)
-                                  updateConfiguration('mqtt', 'username', preset.username)
-                                  updateConfiguration('mqtt', 'password', preset.password)
-                                  updateConfiguration('mqtt', 'ssl', preset.ssl)
-                                  toast.success(`Configuración "${preset.name}" aplicada`, { duration: 2000 })
-                                }}
+                                onClick={() => applyMQTTPreset(preset)}
                                 className={`w-full p-4 bg-white dark:bg-gray-700 rounded-lg border hover:shadow-md transition-all text-left group ${
                                   isDefault 
-                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' 
+                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 ring-2 ring-blue-300' 
                                     : 'border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-600'
                                 }`}
                               >
@@ -2851,10 +3125,11 @@ function App() {
                           <input
                             type="text"
                             value={configurations.mqtt.host}
-                            onChange={(e) => updateConfiguration('mqtt', 'host', e.target.value)}
+                            onChange={(e) => updateMQTTConfiguration('host', e.target.value)}
                             placeholder="ej: 100.107.238.60"
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                           />
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Dirección IP, hostname o dominio del broker MQTT</p>
                         </div>
 
                         <div>
@@ -2862,10 +3137,11 @@ function App() {
                           <input
                             type="number"
                             value={configurations.mqtt.port}
-                            onChange={(e) => updateConfiguration('mqtt', 'port', parseInt(e.target.value))}
+                            onChange={(e) => updateMQTTConfiguration('port', parseInt(e.target.value))}
                             placeholder="1883"
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                           />
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Puerto MQTT (1883 sin SSL, 8883 con SSL)</p>
                         </div>
 
                         <div className="flex items-center space-x-3">
@@ -2885,10 +3161,11 @@ function App() {
                           <input
                             type="text"
                             value={configurations.mqtt.username}
-                            onChange={(e) => updateConfiguration('mqtt', 'username', e.target.value)}
+                            onChange={(e) => updateMQTTConfiguration('username', e.target.value)}
                             placeholder="admin"
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                           />
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Máx 100 caracteres</p>
                         </div>
 
                         <div>
@@ -2896,10 +3173,11 @@ function App() {
                           <input
                             type="password"
                             value={configurations.mqtt.password}
-                            onChange={(e) => updateConfiguration('mqtt', 'password', e.target.value)}
+                            onChange={(e) => updateMQTTConfiguration('password', e.target.value)}
                             placeholder="••••••••"
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                           />
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Máx 256 caracteres</p>
                         </div>
 
                           <button
@@ -3305,6 +3583,68 @@ function App() {
                       </div>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {configTab === 'rtsp' && (
+                <div className="p-8">
+                  <RTSPManager />
+                </div>
+              )}
+
+              {configTab === 'camera-streaming' && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
+                      <svg className="w-8 h-8 mr-3 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                      Visor de Cámaras en Streaming
+                    </h2>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      {cameraIPs.length} cámara(s) configurada(s)
+                    </div>
+                  </div>
+
+                  {cameraIPs.length === 0 ? (
+                    <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-6">
+                      <div className="flex items-start space-x-4">
+                        <svg className="w-6 h-6 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div>
+                          <h3 className="font-semibold text-yellow-900 dark:text-yellow-200 mb-1">No hay cámaras configuradas</h3>
+                          <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                            Dirígete al tab <strong>"Cámaras"</strong> en Configuración para agregar cámaras RTSP. Una vez agregadas, aparecerán aquí.
+                          </p>
+                          <button
+                            onClick={() => setConfigTab('cameras')}
+                            className="mt-3 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg font-medium transition-colors"
+                          >
+                            Ir a Configuración de Cámaras
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Galería de Cámaras */}
+                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+                        <RTSPCameraGallery 
+                          apiUrl={API_URL}
+                          configuredCameras={cameraIPs}
+                          cameraConfig={configurations.cameras}
+                        />
+                      </div>
+
+                      {/* Información */}
+                      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                        <p className="text-sm text-blue-800 dark:text-blue-200">
+                          <strong>💡 Tip:</strong> Los streams se mostrarán en tiempo real con auto-reconexión automática. El timeout de conexión es de {configurations.cameras.connectionTimeout} segundos.
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
