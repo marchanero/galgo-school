@@ -124,12 +124,23 @@ jobs:
     name: Deploy to Production (galgo-mini-01)
     needs: [validate, test, security]
     if: github.ref == 'refs/heads/main'
-    runs-on: galgo-mini-01
+    runs-on: self-hosted
+    timeout-minutes: 15
     environment:
       name: production
       url: http://galgo-mini-01:3000
     steps:
       - uses: actions/checkout@v4
+      
+      - name: 🔍 Runner diagnostics
+        run: |
+          echo "🔍 Runner Information:"
+          echo "  Hostname: $(hostname)"
+          echo "  OS: $(uname -s)"
+          echo "  Architecture: $(uname -m)"
+          echo "  User: $(whoami)"
+          echo "  Working Directory: $(pwd)"
+          echo ""
       
       - name: 🏷️ Get build info
         id: build
@@ -239,12 +250,23 @@ jobs:
     name: Deploy to Testing (galgo-home)
     needs: [validate, test, security]
     if: github.ref != 'refs/heads/main'
-    runs-on: galgo-home
+    runs-on: self-hosted
+    timeout-minutes: 15
     environment:
       name: testing
       url: http://galgo-home:3000
     steps:
       - uses: actions/checkout@v4
+      
+      - name: 🔍 Runner diagnostics
+        run: |
+          echo "🔍 Runner Information:"
+          echo "  Hostname: $(hostname)"
+          echo "  OS: $(uname -s)"
+          echo "  Architecture: $(uname -m)"
+          echo "  User: $(whoami)"
+          echo "  Working Directory: $(pwd)"
+          echo ""
       
       - name: 🏷️ Get build info
         id: build
