@@ -354,3 +354,33 @@ jobs:
           echo ""
           echo "⚠️ MANUAL INTERVENTION REQUIRED"
           echo "   Please check the workflow logs for details"
+
+      - name: Cleanup unused resources
+        if: always()
+        run: |
+          echo "🧹 Limpiando recursos no utilizados..."
+          
+          # Contar recursos antes
+          echo "📊 Recursos antes de limpieza:"
+          echo "  Images: $(docker images -q | wc -l)"
+          echo "  Containers: $(docker ps -a -q | wc -l)"
+          echo "  Volumes: $(docker volume ls -q | wc -l)"
+          
+          # Limpiar
+          echo "🗑️ Eliminando imágenes no utilizadas..."
+          docker image prune -f --filter "dangling=true" 2>/dev/null || true
+          
+          echo "🗑️ Eliminando volúmenes no utilizados..."
+          docker volume prune -f 2>/dev/null || true
+          
+          echo "🗑️ Eliminando redes no utilizadas..."
+          docker network prune -f 2>/dev/null || true
+          
+          # Contar recursos después
+          echo ""
+          echo "📊 Recursos después de limpieza:"
+          echo "  Images: $(docker images -q | wc -l)"
+          echo "  Containers: $(docker ps -a -q | wc -l)"
+          echo "  Volumes: $(docker volume ls -q | wc -l)"
+          echo ""
+          echo "✅ Limpieza completada"
