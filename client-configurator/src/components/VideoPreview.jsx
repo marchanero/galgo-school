@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import Hls from 'hls.js';
 
 /**
  * Componente para reproducir video HLS con controles y estado
@@ -15,6 +16,19 @@ const VideoPreview = ({
 }) => {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
+  const initializedRef = useRef(false);
+  
+  // Refs para valores que no deberían causar re-inicialización
+  const autoPlayRef = useRef(autoPlay);
+  const cameraIdRef = useRef(cameraId);
+  const onStatusChangeRef = useRef(onStatusChange);
+  
+  // Actualizar refs cuando cambien los props
+  useEffect(() => {
+    autoPlayRef.current = autoPlay;
+    cameraIdRef.current = cameraId;
+    onStatusChangeRef.current = onStatusChange;
+  }, [autoPlay, cameraId, onStatusChange]);
 
   const [isPlaying, setIsPlaying] = useState(autoPlay);
   const [isMuted, setIsMuted] = useState(muted);
@@ -23,87 +37,169 @@ const VideoPreview = ({
   const [duration, setDuration] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [isLive, setIsLive] = useState(true);
   const [uptime, setUptime] = useState(0);
+  const [needsUserInteraction, setNeedsUserInteraction] = useState(false);
 
   const uptimeIntervalRef = useRef(null);
-
-  // Formatear tiempo en HH:MM:SS
-  const formatTime = (seconds) => {
-    const date = new Date(seconds * 1000);
-    const hh = date.getUTCHours();
-    const mm = date.getUTCMinutes();
-    const ss = date.getUTCSeconds().toString().padStart(2, '0');
-    return `${hh}:${mm.toString().padStart(2, '0')}:${ss}`;
-  };
+  const autoplayAttemptedRef = useRef(false);
 
   // Inicializar HLS
   useEffect(() => {
-    if (!videoRef.current) return;
+    console.log('🎬 VideoPreview - useEffect llamado para hlsUrl:', hlsUrl);
+    
+    // Si ya está inicializado para esta URL, no hacer nada
+    if (initializedRef.current === hlsUrl && hlsRef.current) {
+      console.log('🎬 VideoPreview - Ya inicializado para esta URL, saltando');
+      return;
+    }
+
+    // Si hay una instancia anterior con diferente URL, destruirla
+    if (hlsRef.current && initializedRef.current !== hlsUrl) {
+      console.log('🧹 VideoPreview - Destruyendo instancia anterior para nueva URL');
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    console.log('🎬 VideoPreview - Inicializando para URL:', hlsUrl);
+
+    if (!videoRef.current || !hlsUrl) {
+      console.warn('🎬 VideoPreview - No hay videoRef o hlsUrl');
+      return;
+    }
+
+    // Marcar como inicializado INMEDIATAMENTE para evitar reinicios
+    initializedRef.current = hlsUrl;
+    // Resetear el flag de autoplay
+    autoplayAttemptedRef.current = false;
 
     const initHLS = async () => {
       try {
+        console.log('🔧 Iniciando inicialización HLS...');
         setIsLoading(true);
         setError(null);
+        setNeedsUserInteraction(false);
+        autoplayAttemptedRef.current = false;
+
+        // Función segura para intentar autoplay
+        const attemptAutoplay = () => {
+          if (!videoRef.current || autoplayAttemptedRef.current) {
+            console.log('🎬 attemptAutoplay - Cancelado (no videoRef o ya intentado)');
+            return;
+          }
+
+          // Verificar que el elemento esté aún en el documento
+          if (!document.contains(videoRef.current)) {
+            console.warn('🎬 Video element no está en el documento, cancelando autoplay');
+            return;
+          }
+
+          console.log('🎬 Intentando autoplay inmediatamente...');
+          autoplayAttemptedRef.current = true;
+
+          // Intentar reproducir inmediatamente
+          videoRef.current.play()
+            .then(() => {
+              console.log('✅ Autoplay exitoso');
+              setIsPlaying(true);
+            })
+            .catch((error) => {
+              console.warn('⚠️ No se pudo autoplay - requiere interacción del usuario:', error.name);
+              setNeedsUserInteraction(true);
+              setIsPlaying(false);
+            });
+        };
 
         // Comprobar si HLS.js está disponible
-        if (window.HLS) {
-          const hls = new window.HLS({
-            debug: false,
+        console.log('🔍 Verificando soporte HLS.js:', typeof Hls, Hls.isSupported());
+        if (Hls.isSupported()) {
+          console.log('✅ HLS.js soportado, creando instancia...');
+          const hls = new Hls({
+            debug: true, // Habilitar debug para más información
             enableWorker: true,
             lowLatencyMode: true,
             maxBufferLength: 5,
             maxMaxBufferLength: 10,
           });
 
+          console.log('🎬 Cargando fuente HLS:', hlsUrl);
           hls.loadSource(hlsUrl);
+          console.log('🎬 Adjuntando media al video element...');
           hls.attachMedia(videoRef.current);
 
           // Manejo de errores HLS
-          hls.on('hlsError', (event, data) => {
+          hls.on(Hls.Events.ERROR, (event, data) => {
             console.error('❌ Error HLS:', data);
             if (data.fatal) {
               setError(`Error fatal: ${data.details}`);
-              onStatusChange?.({
-                cameraId,
+              onStatusChangeRef.current?.({
+                cameraId: cameraIdRef.current,
                 status: 'error',
                 error: data.details,
               });
             }
           });
 
-          hls.on('hlsManifestParsed', () => {
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
             console.log('✅ Manifest HLS parseado correctamente');
-            setIsLoading(false);
-            setIsPlaying(autoPlay);
-            if (autoPlay && videoRef.current) {
-              videoRef.current.play().catch((e) => {
-                console.warn('No se pudo autoplay:', e);
-              });
+            
+            // Verificar que el componente sigue montado
+            if (!videoRef.current || !document.contains(videoRef.current)) {
+              console.warn('⚠️ Componente desmontado durante MANIFEST_PARSED');
+              return;
             }
-            onStatusChange?.({
-              cameraId,
+            
+            setIsLoading(false);
+            setIsPlaying(autoPlayRef.current);
+            
+            if (autoPlayRef.current) {
+              console.log('🎬 Llamando attemptAutoplay desde MANIFEST_PARSED');
+              attemptAutoplay();
+            }
+            
+            onStatusChangeRef.current?.({
+              cameraId: cameraIdRef.current,
               status: 'connected',
               error: null,
             });
           });
 
+          hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+            console.log('📺 Media adjuntada correctamente');
+          });
+
+          hls.on(Hls.Events.MANIFEST_LOADING, () => {
+            console.log('📄 Cargando manifest...');
+          });
+
+          hls.on(Hls.Events.LEVEL_LOADING, () => {
+            console.log('📊 Cargando nivel...');
+          });
+
+          hls.on(Hls.Events.FRAG_LOADING, () => {
+            console.log('🎬 Cargando fragmento...');
+          });
+
+          hls.on(Hls.Events.FRAG_LOADED, () => {
+            console.log('✅ Fragmento cargado');
+          });
+
           hlsRef.current = hls;
         } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
           // Safari native HLS support
+          console.log('🍎 Usando soporte nativo HLS de Safari');
           videoRef.current.src = hlsUrl;
           videoRef.current.addEventListener('loadedmetadata', () => {
+            console.log('✅ Metadata cargada para Safari');
             setIsLoading(false);
-            if (autoPlay) {
-              videoRef.current.play().catch((e) => {
-                console.warn('No se pudo autoplay:', e);
-              });
+            if (autoPlayRef.current) {
+              attemptAutoplay();
             }
           });
         } else {
+          console.error('❌ Navegador no soporta reproducción HLS');
           setError('Tu navegador no soporta reproducción HLS');
-          onStatusChange?.({
-            cameraId,
+          onStatusChangeRef.current?.({
+            cameraId: cameraIdRef.current,
             status: 'error',
             error: 'Navegador no soportado',
           });
@@ -111,8 +207,8 @@ const VideoPreview = ({
       } catch (err) {
         console.error('Error inicializando HLS:', err);
         setError(err.message);
-        onStatusChange?.({
-          cameraId,
+        onStatusChangeRef.current?.({
+          cameraId: cameraIdRef.current,
           status: 'error',
           error: err.message,
         });
@@ -122,11 +218,28 @@ const VideoPreview = ({
     initHLS();
 
     return () => {
+      console.log('🧹 VideoPreview - Cleanup ejecutándose para URL:', initializedRef.current);
+      
+      // Solo destruir si realmente cambia la URL
       if (hlsRef.current) {
+        console.log('🧹 VideoPreview - Destruyendo HLS instance');
         hlsRef.current.destroy();
+        hlsRef.current = null;
       }
+      
+      initializedRef.current = null;
+      autoplayAttemptedRef.current = false;
     };
-  }, [hlsUrl, cameraId, autoPlay, onStatusChange]);
+  }, [hlsUrl]); // Solo depender de hlsUrl para minimizar re-renders
+
+  // Formatear tiempo en HH:MM:SS
+  const formatTime = (seconds) => {
+    const date = new Date(seconds * 1000);
+    const hh = date.getUTCHours();
+    const mm = date.getUTCMinutes();
+    const ss = date.getUTCSeconds().toString().padStart(2, '0');
+    return `${hh}:${mm.toString().padStart(2, '0')}:${ss}`;
+  };
 
   // Actualizar uptime
   useEffect(() => {
@@ -204,6 +317,10 @@ const VideoPreview = ({
           muted={isMuted}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
+          onCanPlay={() => console.log('🎬 Video puede reproducirse')}
+          onPlay={() => console.log('▶️ Video empezó a reproducirse')}
+          onPause={() => console.log('⏸️ Video pausado')}
+          onError={(e) => console.error('❌ Error en video element:', e)}
         />
 
         {/* Loading Spinner */}
@@ -225,11 +342,16 @@ const VideoPreview = ({
           </div>
         )}
 
-        {/* Live Badge */}
-        {isLive && !error && (
-          <div className="absolute top-3 right-3 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2">
-            <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
-            EN VIVO
+        {/* Click to Play Overlay */}
+        {needsUserInteraction && !isPlaying && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60 cursor-pointer" onClick={handlePlayPause}>
+            <div className="text-center text-white">
+              <svg className="w-16 h-16 mx-auto mb-4 opacity-80" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+              <p className="text-lg font-semibold">Haz clic para reproducir</p>
+              <p className="text-sm opacity-75 mt-1">El navegador requiere interacción para iniciar el video</p>
+            </div>
           </div>
         )}
 

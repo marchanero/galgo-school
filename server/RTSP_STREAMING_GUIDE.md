@@ -41,10 +41,10 @@ ffmpeg -version
 
 ### 1. Agregar una Cámara RTSP
 
-**Endpoint:** `POST /api/cameras`
+**Endpoint:** `POST /api/rtsp/cameras`
 
 ```bash
-curl -X POST http://localhost:3001/api/cameras \
+curl -X POST http://localhost:3001/api/rtsp/cameras \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Cámara Sala Principal",

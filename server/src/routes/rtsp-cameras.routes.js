@@ -371,3 +371,5 @@ router.post('/:id/toggle', rtspCameraController.toggleCamera.bind(rtspCameraCont
 router.get('/:id/stream-info', rtspCameraController.getStreamInfo.bind(rtspCameraController));
 
 module.exports = router;
+
+module.exports = router;
