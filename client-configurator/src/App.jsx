@@ -1135,6 +1135,14 @@ function App() {
       }
     }
 
+    // Show confirmation if changing critical fields and connection exists
+    if ((field === 'host' || field === 'port') && mqttStatus.connected) {
+      const confirmed = window.confirm(
+        `⚠️ Atención!\n\nEstá cambiando ${field === 'host' ? 'el host' : 'el puerto'} del broker.\n\n¿Está seguro? Esto puede desconectar la sesión actual.`
+      )
+      if (!confirmed) return false
+    }
+
     // If validation passes (or not needed), update the configuration
     updateConfiguration('mqtt', field, value)
     
@@ -1170,6 +1178,15 @@ function App() {
         icon: '❌'
       })
       return false
+    }
+
+    // Show confirmation if already connected (to avoid accidental disconnection)
+    if (mqttStatus.connected && mqttStatus.broker !== `mqtt://${preset.host}:${preset.port}`) {
+      const currentBroker = mqttStatus.broker || configurations.mqtt.defaultBroker
+      const confirmed = window.confirm(
+        `⚠️ Atención!\n\nEstá conectado a:\n${currentBroker}\n\n¿Desconectar y cambiar a:\n${preset.name} (${preset.host}:${preset.port})?`
+      )
+      if (!confirmed) return false
     }
 
     // Apply the preset configuration
