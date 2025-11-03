@@ -5,6 +5,7 @@ import Navbar from './components/Navbar'
 import SensorManagement from './components/SensorManagement'
 import MqttConnectionStatus from './components/MqttConnectionStatus'
 import RTSPManager from './components/RTSPManager'
+import RTSPCameraGallery from './components/RTSPCameraGallery'
 import { useFormValidation, validationRules } from './hooks/useFormValidation'
 
 // API URL - use environment variable for Docker deployment
@@ -3314,6 +3315,31 @@ function App() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )
+      case 'Cámaras RTSP':
+        return (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
+                <svg className="w-8 h-8 mr-3 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                Visor de Cámaras RTSP
+              </h2>
+            </div>
+
+            {/* Galería de Cámaras */}
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+              <RTSPCameraGallery apiUrl={API_URL} />
+            </div>
+
+            {/* Información */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                <strong>💡 Tip:</strong> Configura cámaras RTSP en la sección de configuración y luego visualiza los streams aquí en tiempo real con auto-reconexión automática.
+              </p>
             </div>
           </div>
         )

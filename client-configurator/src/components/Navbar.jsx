@@ -3,7 +3,7 @@ import { useTheme } from '../contexts/ThemeContext'
 const Navbar = ({ currentSection, setCurrentSection, setConfigTab }) => {
   const { theme, toggleTheme } = useTheme()
 
-  const sections = ['Dashboard', 'RTSP', 'Configuración']
+  const sections = ['Dashboard', 'RTSP', 'Cámaras RTSP', 'Configuración']
 
   return (
     <nav className="bg-gray-50 dark:bg-gray-800 shadow-lg border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50">
