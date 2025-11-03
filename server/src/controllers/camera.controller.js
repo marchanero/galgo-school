@@ -1,4 +1,5 @@
 const { getDatabase } = require('../config/database');
+const rtspService = require('../services/rtsp.service');
 
 class CameraController {
   /**
@@ -252,7 +253,7 @@ class CameraController {
       const { id } = req.params;
       const db = getDatabase();
 
-      db.get('SELECT ip, port, username, password, path FROM cameras WHERE id = ?', [id], (err, camera) => {
+      db.get('SELECT id, ip, port, username, password, path FROM cameras WHERE id = ?', [id], async (err, camera) => {
         if (err) {
           console.error('Error fetching camera:', err);
           return res.status(500).json({ error: 'Error al obtener cámara' });
@@ -262,47 +263,194 @@ class CameraController {
           return res.status(404).json({ error: 'Cámara no encontrada' });
         }
 
-        // Build RTSP URL
-        let rtspUrl = `rtsp://${camera.ip}:${camera.port}${camera.path}`;
-        if (camera.username && camera.password) {
-          rtspUrl = `rtsp://${camera.username}:${camera.password}@${camera.ip}:${camera.port}${camera.path}`;
-        }
+        try {
+          // Actualizar estado a "testing"
+          await rtspService.updateCameraStatus(camera.id, 'testing');
 
-        // For now, simulate a connection test (would need actual RTSP testing library)
-        const connectionStatus = 'testing';
-        
-        // Update last_checked timestamp
-        db.run(
-          'UPDATE cameras SET connection_status = ?, last_checked = CURRENT_TIMESTAMP WHERE id = ?',
-          [connectionStatus, id],
-          (updateErr) => {
-            if (updateErr) {
-              console.error('Error updating camera status:', updateErr);
+          // Probar conexión RTSP real
+          const testResult = await rtspService.testRTSPConnection(camera);
+
+          // Actualizar estado final
+          await rtspService.updateCameraStatus(camera.id, testResult.status);
+
+          // Obtener información adicional del stream si la conexión fue exitosa
+          let streamInfo = null;
+          if (testResult.success) {
+            const infoResult = await rtspService.getStreamInfo(camera);
+            if (infoResult.success) {
+              streamInfo = infoResult.stream_info;
             }
-
-            // Simulate async test and respond
-            setTimeout(() => {
-              res.json({
-                success: true,
-                connection_status: 'connected',
-                rtsp_url: rtspUrl,
-                message: 'Conexión a cámara establecida exitosamente'
-              });
-
-              // Update final status
-              db.run(
-                'UPDATE cameras SET connection_status = ? WHERE id = ?',
-                ['connected', id],
-                (err) => {
-                  if (err) console.error('Error updating final camera status:', err);
-                }
-              );
-            }, 2000);
           }
-        );
+
+          res.json({
+            success: testResult.success,
+            connection_status: testResult.status,
+            rtsp_url: testResult.rtsp_url,
+            stream_info: streamInfo,
+            message: testResult.message
+          });
+
+        } catch (testError) {
+          console.error('Error testing RTSP connection:', testError);
+
+          // Actualizar estado a error
+          await rtspService.updateCameraStatus(camera.id, 'error');
+
+          res.status(500).json({
+            success: false,
+            connection_status: 'error',
+            rtsp_url: null,
+            message: `Error al probar conexión: ${testError.message}`
+          });
+        }
       });
     } catch (error) {
       console.error('Error testing camera connection:', error);
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  }
+
+  /**
+   * POST /api/cameras/:id/start-relay - Iniciar retransmisión RTSP
+   */
+  async startStreamRelay(req, res) {
+    try {
+      const { id } = req.params;
+      const { outputPort } = req.body;
+
+      const db = getDatabase();
+
+      db.get('SELECT id, name FROM cameras WHERE id = ?', [id], async (err, camera) => {
+        if (err) {
+          console.error('Error fetching camera:', err);
+          return res.status(500).json({ error: 'Error al obtener cámara' });
+        }
+
+        if (!camera) {
+          return res.status(404).json({ error: 'Cámara no encontrada' });
+        }
+
+        try {
+          const relayResult = await rtspService.startStreamRelay(id, outputPort);
+
+          if (relayResult.success) {
+            res.json({
+              success: true,
+              relay_url: relayResult.relay_url,
+              message: relayResult.message
+            });
+          } else {
+            res.status(500).json({
+              success: false,
+              message: relayResult.message
+            });
+          }
+
+        } catch (relayError) {
+          console.error('Error starting RTSP relay:', relayError);
+          res.status(500).json({
+            success: false,
+            message: `Error al iniciar retransmisión: ${relayError.message}`
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Error starting stream relay:', error);
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  }
+
+  /**
+   * POST /api/cameras/:id/stop-relay - Detener retransmisión RTSP
+   */
+  async stopStreamRelay(req, res) {
+    try {
+      const { id } = req.params;
+
+      const relayResult = await rtspService.stopStreamRelay(id);
+
+      if (relayResult.success) {
+        res.json({
+          success: true,
+          message: relayResult.message
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          message: relayResult.message
+        });
+      }
+
+    } catch (error) {
+      console.error('Error stopping stream relay:', error);
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  }
+
+  /**
+   * GET /api/cameras/streams/active - Obtener streams activos
+   */
+  async getActiveStreams(req, res) {
+    try {
+      const activeStreams = rtspService.getActiveStreams();
+
+      res.json({
+        streams: activeStreams,
+        count: activeStreams.length
+      });
+
+    } catch (error) {
+      console.error('Error getting active streams:', error);
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  }
+
+  /**
+   * GET /api/cameras/:id/stream-info - Obtener información del stream
+   */
+  async getStreamInfo(req, res) {
+    try {
+      const { id } = req.params;
+      const db = getDatabase();
+
+      db.get('SELECT id, ip, port, username, password, path FROM cameras WHERE id = ?', [id], async (err, camera) => {
+        if (err) {
+          console.error('Error fetching camera:', err);
+          return res.status(500).json({ error: 'Error al obtener cámara' });
+        }
+
+        if (!camera) {
+          return res.status(404).json({ error: 'Cámara no encontrada' });
+        }
+
+        try {
+          const infoResult = await rtspService.getStreamInfo(camera);
+
+          if (infoResult.success) {
+            res.json({
+              success: true,
+              stream_info: infoResult.stream_info,
+              message: infoResult.message
+            });
+          } else {
+            res.status(500).json({
+              success: false,
+              stream_info: null,
+              message: infoResult.message
+            });
+          }
+
+        } catch (infoError) {
+          console.error('Error getting stream info:', infoError);
+          res.status(500).json({
+            success: false,
+            stream_info: null,
+            message: `Error al obtener información del stream: ${infoError.message}`
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Error getting stream info:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
     }
   }
@@ -313,12 +461,12 @@ class CameraController {
   isValidIP(ip) {
     const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
     const hostPattern = /^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
-    
+
     if (ipv4Pattern.test(ip)) {
       const parts = ip.split('.');
       return parts.every(part => parseInt(part) >= 0 && parseInt(part) <= 255);
     }
-    
+
     return hostPattern.test(ip);
   }
 }

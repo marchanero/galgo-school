@@ -1,7 +1,8 @@
-// contexts/ThemeContext.tsx
-import React, { useEffect, useState } from 'react';
-import { ThemeContext } from './themeContext';
+// contexts/themeContext.ts
+import React, { createContext, useEffect, useState } from 'react';
 import type { ThemeContextType } from '../types';
+
+export const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 interface ThemeProviderProps {
   children: React.ReactNode;

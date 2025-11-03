@@ -397,7 +397,7 @@ module.exports = new SensorService()
 ### Ejemplo 4: Custom Hook - useFormValidation
 
 ```javascript
-// client/src/hooks/useFormValidation.js
+// client-configurator/src/hooks/useFormValidation.js
 import { useState, useCallback } from 'react'
 
 export const validationRules = {
@@ -554,7 +554,7 @@ export const useFormValidation = (initialValues, rules = {}) => {
 ### Ejemplo 5: React Component - SensorManagement
 
 ```jsx
-// client/src/components/SensorManagement.jsx
+// client-configurator/src/components/SensorManagement.jsx
 import { useState } from 'react'
 import toast from 'react-hot-toast'
 import { useFormValidation, validationRules } from '../hooks/useFormValidation'
@@ -713,7 +713,7 @@ export default SensorManagement
 ### Ejemplo 6: React Context - ThemeContext
 
 ```jsx
-// client/src/contexts/ThemeContext.jsx
+// client-configurator/src/contexts/ThemeContext.jsx
 import { createContext, useContext, useEffect, useState } from 'react'
 
 const ThemeContext = createContext()
@@ -765,7 +765,7 @@ export const ThemeProvider = ({ children }) => {
 ### Ejemplo 7: Frontend API Call con Polling
 
 ```jsx
-// client/src/App.jsx (fragmento)
+// client-configurator/src/App.jsx (fragmento)
 useEffect(() => {
   // Polling automático cada 30 segundos
   if (!configurations.mqtt.autoPolling?.enabled) return

@@ -132,7 +132,7 @@ monitoring:
 
 ```
 galgo-school/
-├── client/                          # React Frontend (JavaScript)
+├── client-configurator/             # React Frontend (JavaScript)
 │   ├── src/
 │   │   ├── App.jsx                 # Componente principal
 │   │   ├── main.jsx                # Entry point
@@ -585,7 +585,7 @@ deleteSensor(id)                    // Eliminar
 ---
 
 ### **4. ThemeContext (Frontend)**
-**Ubicación**: `client/src/contexts/ThemeContext.jsx`
+**Ubicación**: `client-configurator/src/contexts/ThemeContext.jsx`
 
 **Características**:
 - Alternancia light/dark mode
@@ -596,7 +596,7 @@ deleteSensor(id)                    // Eliminar
 ---
 
 ### **5. useFormValidation Hook (Frontend)**
-**Ubicación**: `client/src/hooks/useFormValidation.js`
+**Ubicación**: `client-configurator/src/hooks/useFormValidation.js`
 
 **Características**:
 ```javascript
@@ -625,7 +625,7 @@ useFormValidation(initialValues, rules)
 ---
 
 ### **6. SensorManagement Component (Frontend)**
-**Ubicación**: `client/src/components/SensorManagement.jsx`
+**Ubicación**: `client-configurator/src/components/SensorManagement.jsx`
 
 **Responsabilidades**:
 - Listado de sensores
@@ -741,7 +741,7 @@ CREATE TABLE configurations (
 ## 🖥️ Frontend
 
 ### **Cliente 1: Full Dashboard (JavaScript)**
-**Ubicación**: `client/`
+**Ubicación**: `client-configurator/`
 
 **Características**:
 - ✅ Dashboard completo con estadísticas
@@ -899,7 +899,7 @@ services:
     └─ Restart: unless-stopped
 
   galgo-client:
-    ├─ Build: ./client/Dockerfile
+    ├─ Build: ./client-configurator/Dockerfile
     ├─ Port: 5173
     ├─ ENV: VITE_API_URL
     ├─ Depends_on: galgo-server (healthy)
@@ -984,7 +984,7 @@ pnpm dev
 
 # Esto ejecuta en paralelo:
 # - cd server && npm run dev (nodemon)
-# - cd client && npm run dev (Vite)
+# - cd client-configurator && npm run dev (Vite)
 # - cd client2 && npm run dev (Vite)
 ```
 
@@ -1128,10 +1128,10 @@ Backend
 └── server/index.js                      → Entry point
 
 Frontend (JS)
-├── client/src/App.jsx                   → Componente raíz
-├── client/src/contexts/ThemeContext.jsx → Estado global
-├── client/src/hooks/useFormValidation.js → Lógica validación
-└── client/src/components/*              → Componentes UI
+├── client-configurator/src/App.jsx                   → Componente raíz
+├── client-configurator/src/contexts/ThemeContext.jsx → Estado global
+├── client-configurator/src/hooks/useFormValidation.js → Lógica validación
+└── client-configurator/src/components/*              → Componentes UI
 
 Frontend (TS)
 ├── client2/src/App.tsx                  → Versión TypeScript
@@ -1141,7 +1141,7 @@ Frontend (TS)
 Docker
 ├── docker-compose.yml                   → Orquestación
 ├── server/Dockerfile                    → Build backend
-├── client/Dockerfile                    → Build frontend
+├── client-configurator/Dockerfile       → Build frontend
 └── client2/Dockerfile                   → Build frontend2
 ```
 

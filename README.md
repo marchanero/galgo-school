@@ -14,7 +14,7 @@ A full-stack application for managing various sensors in the Galgo-School projec
 ## Project Structure
 ```
 galgo-config/
-├── client/                 # React frontend application
+├── client-configurator/    # React frontend application (configurator)
 │   ├── src/
 │   │   ├── components/     # React components
 │   │   ├── contexts/       # React contexts
@@ -81,9 +81,9 @@ galgo-config/
    cd server
    npm install
 
-   # Frontend dependencies
-   cd ../client
-   npm install
+  # Frontend dependencies
+  cd ../client-configurator
+  npm install
    ```
 
 3. **Configure MQTT Broker**
@@ -204,7 +204,7 @@ The project includes a GitHub Actions workflow (`.github/workflows/deploy.yml`) 
 
 ### Environment Variables
 
-Create `.env` files in both `client/` and `server/` directories:
+Create `.env` files in both `client-configurator/` and `server/` directories:
 
 **server/.env:**
 ```
@@ -215,7 +215,7 @@ NODE_ENV=production
 PORT=3001
 ```
 
-**client/.env.production:**
+**client-configurator/.env.production:**
 ```
 VITE_API_URL=http://your-server:3001
 ```
@@ -229,7 +229,7 @@ cd server
 npm test
 
 # Frontend tests
-cd client
+cd client-configurator
 npm test
 ```
 
@@ -240,7 +240,7 @@ cd server
 npm run lint
 
 # Lint frontend
-cd client
+cd client-configurator
 npm run lint
 ```
 
