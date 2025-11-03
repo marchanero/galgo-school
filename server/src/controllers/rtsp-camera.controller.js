@@ -1,5 +1,6 @@
 const cameraService = require('../services/camera.service');
 const rtspService = require('../services/rtsp.service');
+const rtspConfig = require('../config/rtsp.config');
 
 class RTSPCameraController {
   /**
@@ -39,27 +40,35 @@ class RTSPCameraController {
     try {
       const { name, ip, port, username, password, path, protocol } = req.body;
 
-      // Validaciones
-      if (!name || !ip) {
-        return res.status(400).json({ error: 'Nombre e IP son requeridos' });
+      // Usar validaciones centralizadas
+      const validation = rtspConfig.validateCameraConfig({
+        name,
+        ip,
+        port: port || rtspConfig.rtsp.defaultPort,
+        path: path || rtspConfig.rtsp.defaultPath,
+        protocol: protocol || 'rtsp'
+      });
+
+      if (!validation.isValid) {
+        return res.status(400).json({
+          error: 'Datos de validación inválidos',
+          details: validation.errors
+        });
       }
 
-      if (!this.isValidIP(ip)) {
-        return res.status(400).json({ error: 'Formato de IP inválido' });
-      }
-
-      if (port && (isNaN(port) || port < 1 || port > 65535)) {
-        return res.status(400).json({ error: 'Puerto debe estar entre 1 y 65535' });
+      // Validaciones adicionales específicas del negocio
+      if (name.length < 2) {
+        return res.status(400).json({ error: 'El nombre debe tener al menos 2 caracteres' });
       }
 
       const camera = await cameraService.addCamera({
-        name,
-        ip,
-        port,
-        username,
-        password,
-        path,
-        protocol
+        name: name.trim(),
+        ip: ip.trim(),
+        port: port || rtspConfig.rtsp.defaultPort,
+        username: username?.trim(),
+        password, // No trim para preservar espacios si existen
+        path: path || rtspConfig.rtsp.defaultPath,
+        protocol: protocol || 'rtsp'
       });
 
       res.status(201).json({
@@ -84,29 +93,41 @@ class RTSPCameraController {
       const { id } = req.params;
       const { name, ip, port, username, password, path, protocol, enabled } = req.body;
 
-      // Validaciones
-      if (ip && !this.isValidIP(ip)) {
-        return res.status(400).json({ error: 'Formato de IP inválido' });
+      // Obtener cámara actual para merge
+      const currentCamera = await cameraService.getCameraById(id);
+
+      // Preparar datos actualizados
+      const updatedData = {
+        name: name !== undefined ? name.trim() : currentCamera.name,
+        ip: ip !== undefined ? ip.trim() : currentCamera.ip,
+        port: port !== undefined ? port : currentCamera.port,
+        username: username !== undefined ? username?.trim() : currentCamera.username,
+        password: password !== undefined ? password : currentCamera.password,
+        path: path !== undefined ? path : currentCamera.path,
+        protocol: protocol !== undefined ? protocol : currentCamera.protocol,
+        enabled: enabled !== undefined ? enabled : currentCamera.enabled
+      };
+
+      // Validar datos actualizados
+      const validation = rtspConfig.validateCameraConfig(updatedData);
+      if (!validation.isValid) {
+        return res.status(400).json({
+          error: 'Datos de validación inválidos',
+          details: validation.errors
+        });
       }
 
-      if (port && (isNaN(port) || port < 1 || port > 65535)) {
-        return res.status(400).json({ error: 'Puerto debe estar entre 1 y 65535' });
+      // Validaciones adicionales
+      if (updatedData.name.length < 2) {
+        return res.status(400).json({ error: 'El nombre debe tener al menos 2 caracteres' });
       }
 
-      await cameraService.updateCamera(id, {
-        name,
-        ip,
-        port,
-        username,
-        password,
-        path,
-        protocol,
-        enabled
-      });
+      await cameraService.updateCamera(id, updatedData);
 
       res.json({
         success: true,
-        message: 'Cámara actualizada exitosamente'
+        message: 'Cámara actualizada exitosamente',
+        camera: updatedData
       });
     } catch (error) {
       if (error.code === 'NOT_FOUND') {
