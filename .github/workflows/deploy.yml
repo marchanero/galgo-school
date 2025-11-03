@@ -13,6 +13,7 @@ jobs:
   validate:
     name: Pre-Deploy Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       
@@ -43,6 +44,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: validate
     steps:
       - uses: actions/checkout@v4
@@ -81,10 +83,46 @@ jobs:
           echo "✓ server: Checked"
           echo "════════════════════════════════════════"
 
-  # 🚀 Deploy a Producción (main → galgo-mini-01 X64)
+  # 🔒 Security Check
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: validate
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 🔍 Scan for secrets
+        run: |
+          echo "🔍 Checking for common secrets..."
+          if grep -r "password\|secret\|api_key\|token" --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" client-configurator server 2>/dev/null | grep -v "node_modules" | grep -v ".git" | head -5; then
+            echo "⚠️ Potential secrets found - review manually"
+          else
+            echo "✅ No obvious secrets detected"
+          fi
+      
+      - name: 🔍 Check dependencies for known vulnerabilities
+        working-directory: ./client-configurator
+        run: |
+          echo "🔍 Checking client-configurator dependencies..."
+          npm install --legacy-peer-deps > /dev/null 2>&1
+          npm audit --audit-level=moderate 2>&1 || echo "⚠️ Vulnerability audit completed"
+      
+      - name: 📊 Security Summary
+        run: |
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "✅ SECURITY SCAN COMPLETED"
+          echo "════════════════════════════════════════"
+          echo "✓ Secret scan: Completed"
+          echo "✓ Dependency audit: Completed"
+          echo "════════════════════════════════════════"
+
+  #  Deploy a Producción (main → galgo-mini-01 X64)
   deploy-production:
     name: Deploy to Production (galgo-mini-01)
-    needs: [validate, test]
+    needs: [validate, test, security]
     if: github.ref == 'refs/heads/main'
     runs-on: galgo-mini-01
     environment:
@@ -199,7 +237,7 @@ jobs:
   # 🧪 Deploy a Testing (no main → galgo-home ARM64)
   deploy-testing:
     name: Deploy to Testing (galgo-home)
-    needs: [validate, test]
+    needs: [validate, test, security]
     if: github.ref != 'refs/heads/main'
     runs-on: galgo-home
     environment:
