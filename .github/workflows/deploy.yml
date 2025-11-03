@@ -124,6 +124,24 @@ jobs:
       - name: Stop existing containers
         run: docker compose down || true
 
+      - name: Backup current images (for rollback)
+        run: |
+          echo "💾 Creando backup de imágenes actuales..."
+          mkdir -p /tmp/deployment-backup
+          
+          # Guardar IDs de imágenes actuales
+          SERVER_IMAGE=$(docker images galgo-server:latest --quiet 2>/dev/null || echo "none")
+          CLIENT_IMAGE=$(docker images galgo-client:latest --quiet 2>/dev/null || echo "none")
+          
+          echo "$SERVER_IMAGE" > /tmp/deployment-backup/server-image.txt
+          echo "$CLIENT_IMAGE" > /tmp/deployment-backup/client-image.txt
+          
+          if [ "$SERVER_IMAGE" != "none" ] && [ "$CLIENT_IMAGE" != "none" ]; then
+            echo "✅ Backup creado (Server: $SERVER_IMAGE, Client: $CLIENT_IMAGE)"
+          else
+            echo "ℹ️ No hay imágenes previas para backup"
+          fi
+
       - name: Remove old images
         run: |
           echo "🗑️ Limpiando imágenes antiguas..."
@@ -262,3 +280,38 @@ jobs:
           echo "  - API: http://localhost:3000"
           echo "  - Cliente: http://localhost:5173"
           echo "════════════════════════════════════════"
+
+      - name: On failure - Attempt rollback
+        if: failure()
+        run: |
+          echo "❌ Deployment failed, attempting rollback..."
+          
+          SERVER_IMAGE=$(cat /tmp/deployment-backup/server-image.txt 2>/dev/null || echo "none")
+          CLIENT_IMAGE=$(cat /tmp/deployment-backup/client-image.txt 2>/dev/null || echo "none")
+          
+          if [ "$SERVER_IMAGE" = "none" ] || [ "$CLIENT_IMAGE" = "none" ]; then
+            echo "⚠️ No hay backup disponible para rollback"
+            echo "📋 Estado actual de contenedores:"
+            docker compose ps || true
+            echo "📋 Logs de error:"
+            docker compose logs --tail=50 || true
+            exit 1
+          fi
+          
+          echo "🔄 Realizando rollback a versión anterior..."
+          docker compose down || true
+          
+          # Reconstruir con imágenes previas
+          docker compose up -d
+          
+          # Esperar a que servicios se recuperen
+          sleep 10
+          
+          if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
+            echo "✅ Rollback exitoso, servicios restaurados"
+            docker compose ps
+          else
+            echo "❌ Rollback falló, servicios aún no están disponibles"
+            docker compose logs --tail=50
+            exit 1
+          fi
