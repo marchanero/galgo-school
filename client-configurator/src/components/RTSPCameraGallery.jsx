@@ -5,25 +5,49 @@ import toast from 'react-hot-toast';
 
 /**
  * Componente para gestionar y mostrar múltiples cámaras RTSP
+ * @param {string} apiUrl - URL del servidor API
+ * @param {Array} configuredCameras - Cámaras configuradas del sistema (prop from App.jsx)
+ * @param {Object} cameraConfig - Configuración global de cámaras
  */
-const RTSPCameraGallery = ({ apiUrl }) => {
+const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }) => {
   const [cameras, setCameras] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [activeCameraId, setActiveCameraId] = useState(null);
   const [streamStatus, setStreamStatus] = useState({});
 
-  // Cargar cámaras
+  // Cargar cámaras desde props o API
   const loadCameras = async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch(`${apiUrl}/api/cameras`);
-      if (!response.ok) throw new Error('No se pudieron cargar las cámaras');
-      const data = await response.json();
-      setCameras(data);
-      if (data.length > 0 && !activeCameraId) {
-        setActiveCameraId(data[0].id);
+      
+      let loadedCameras = [];
+
+      // Si hay cámaras configuradas en props, usarlas
+      if (configuredCameras && configuredCameras.length > 0) {
+        loadedCameras = configuredCameras.map(cam => ({
+          id: cam.id,
+          name: cam.name,
+          ip: cam.ip,
+          port: cam.port || 554,
+          username: cam.username,
+          password: cam.password,
+          rtspUrl: `rtsp://${cam.username}${cam.password ? ':' + cam.password : ''}${cam.username ? '@' : ''}${cam.ip}:${cam.port}${cam.path || '/stream'}`,
+          connectionTimeout: cameraConfig?.connectionTimeout || 10,
+          autoReconnect: cameraConfig?.autoReconnect !== false
+        }));
+      } else {
+        // Si no hay props, intentar cargar del API
+        const response = await fetch(`${apiUrl}/api/cameras`);
+        if (!response.ok) throw new Error('No se pudieron cargar las cámaras');
+        const data = await response.json();
+        loadedCameras = data;
+      }
+
+      setCameras(loadedCameras);
+      if (loadedCameras.length > 0 && !activeCameraId) {
+        setActiveCameraId(loadedCameras[0].id);
       }
     } catch (err) {
       console.error('Error cargando cámaras:', err);
@@ -36,7 +60,7 @@ const RTSPCameraGallery = ({ apiUrl }) => {
 
   useEffect(() => {
     loadCameras();
-  }, [apiUrl]);
+  }, [apiUrl, configuredCameras, cameraConfig]);
 
   // Iniciar streaming para una cámara
   const startStreamPreview = async (cameraId) => {

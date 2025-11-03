@@ -7,6 +7,7 @@ import MqttConnectionStatus from './components/MqttConnectionStatus'
 import RTSPManager from './components/RTSPManager'
 import RTSPCameraGallery from './components/RTSPCameraGallery'
 import { useFormValidation, validationRules } from './hooks/useFormValidation'
+import { usePersistedConfig } from './hooks/usePersistedConfig'
 
 // API URL - use environment variable for Docker deployment
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3001'
@@ -31,8 +32,8 @@ function App() {
   const [cameraIPs, setCameraIPs] = useState([])
   const [newCameraIP, setNewCameraIP] = useState({ name: '', ip: '', port: '554', username: '', password: '' })
 
-  // Configurations state
-  const [configurations, setConfigurations] = useState({
+  // Configurations state with persistence
+  const defaultConfigurations = {
     general: {
       theme: 'light',
       recordingAutoStart: false,
@@ -69,7 +70,15 @@ function App() {
       bufferSize: 5,
       cameraIPs: []
     }
-  })
+  }
+
+  const {
+    state: configurations,
+    setState: setConfigurations,
+    hasUnsavedChanges,
+    isSaving,
+    saveToServer: saveConfigToServer
+  } = usePersistedConfig('appConfigurations', defaultConfigurations, API_URL, toast)
 
   // MQTT Status - Simplified state management
   const [mqttStatus, setMqttStatus] = useState({
@@ -439,21 +448,38 @@ function App() {
     return () => clearInterval(interval)
   }, [configurations.mqtt.autoPolling?.enabled, configurations.mqtt.autoPolling?.messagesInterval])
 
-  // Load camera IPs from localStorage on mount (temporary, will be moved to API)
+  // Load camera IPs from localStorage and sync with configurations on mount
   useEffect(() => {
     const savedIPs = localStorage.getItem('galgo-camera-ips')
     if (savedIPs) {
       try {
-        setCameraIPs(JSON.parse(savedIPs))
+        const ips = JSON.parse(savedIPs)
+        setCameraIPs(ips)
+        // Sincronizar con configurations
+        setConfigurations(prev => ({
+          ...prev,
+          cameras: {
+            ...prev.cameras,
+            cameraIPs: ips
+          }
+        }))
       } catch (error) {
         console.error('Error loading camera IPs:', error)
       }
     }
   }, [])
 
-  // Save camera IPs to localStorage whenever they change (temporary)
+  // Sincronizar camera IPs con localStorage y configurations
   useEffect(() => {
     localStorage.setItem('galgo-camera-ips', JSON.stringify(cameraIPs))
+    // Sincronizar con configurations.cameras.cameraIPs
+    setConfigurations(prev => ({
+      ...prev,
+      cameras: {
+        ...prev.cameras,
+        cameraIPs: cameraIPs
+      }
+    }))
   }, [cameraIPs])
 
   const [elapsedTime, setElapsedTime] = useState(0)
@@ -1021,8 +1047,11 @@ function App() {
     }))
   }
 
-  const saveAllConfigurations = async () => {
+  const saveAllConfigurations = useCallback(async () => {
+    const toastId = toast.loading('💾 Guardando configuración...', { duration: 30000 })
+    
     try {
+      // Guardar en servidor
       const response = await fetch(`${API_URL}/api/configurations`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1030,15 +1059,23 @@ function App() {
       })
 
       if (response.ok) {
-        toast.success('Configuraciones guardadas exitosamente', { duration: 3000 })
+        toast.success('✅ Configuración guardada exitosamente', { 
+          id: toastId,
+          duration: 3000,
+          icon: '💾'
+        })
       } else {
         throw new Error('Failed to save configurations')
       }
     } catch (error) {
       console.error('Error saving configurations:', error)
-      toast.error('Error al guardar configuraciones', { duration: 5000 })
+      toast.error('❌ Error al guardar configuración', { 
+        id: toastId,
+        duration: 5000,
+        icon: '⚠️'
+      })
     }
-  }
+  }, [configurations])
 
   const handleThemeChange = (newTheme) => {
     setTheme(newTheme)
@@ -3327,19 +3364,50 @@ function App() {
                       </svg>
                       Visor de Cámaras en Streaming
                     </h2>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      {cameraIPs.length} cámara(s) configurada(s)
+                    </div>
                   </div>
 
-                  {/* Galería de Cámaras */}
-                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-                    <RTSPCameraGallery apiUrl={API_URL} />
-                  </div>
+                  {cameraIPs.length === 0 ? (
+                    <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-6">
+                      <div className="flex items-start space-x-4">
+                        <svg className="w-6 h-6 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div>
+                          <h3 className="font-semibold text-yellow-900 dark:text-yellow-200 mb-1">No hay cámaras configuradas</h3>
+                          <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                            Dirígete al tab <strong>"Cámaras"</strong> en Configuración para agregar cámaras RTSP. Una vez agregadas, aparecerán aquí.
+                          </p>
+                          <button
+                            onClick={() => setConfigTab('cameras')}
+                            className="mt-3 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg font-medium transition-colors"
+                          >
+                            Ir a Configuración de Cámaras
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Galería de Cámaras */}
+                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+                        <RTSPCameraGallery 
+                          apiUrl={API_URL}
+                          configuredCameras={cameraIPs}
+                          cameraConfig={configurations.cameras}
+                        />
+                      </div>
 
-                  {/* Información */}
-                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                    <p className="text-sm text-blue-800 dark:text-blue-200">
-                      <strong>💡 Tip:</strong> Configura cámaras RTSP en la sección de configuración de cámaras y luego visualiza los streams aquí en tiempo real con auto-reconexión automática.
-                    </p>
-                  </div>
+                      {/* Información */}
+                      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                        <p className="text-sm text-blue-800 dark:text-blue-200">
+                          <strong>💡 Tip:</strong> Los streams se mostrarán en tiempo real con auto-reconexión automática. El timeout de conexión es de {configurations.cameras.connectionTimeout} segundos.
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
