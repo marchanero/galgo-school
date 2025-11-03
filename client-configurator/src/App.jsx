@@ -1669,12 +1669,6 @@ function App() {
             />
           </div>
         )
-      case 'RTSP':
-        return (
-          <div className="p-8">
-            <RTSPManager />
-          </div>
-        )
       case 'Configuración':
         return (
           <div className="p-8">
@@ -1688,6 +1682,8 @@ function App() {
                     { id: 'general', label: 'General', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
                     { id: 'sensors', label: 'Sensores', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
                     { id: 'cameras', label: 'Cámaras', icon: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z' },
+                    { id: 'rtsp', label: 'RTSP', icon: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z' },
+                    { id: 'camera-streaming', label: 'Cámaras Streaming', icon: 'M14.828 14.828a4 4 0 01-5.656 0M21 12a9 9 0 11-18 0 9 9 0 0118 0zM15 12a3 3 0 11-6 0 3 3 0 016 0z' },
                     { id: 'recordings', label: 'Grabaciones', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
                     { id: 'mqtt', label: 'MQTT', icon: 'M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' }
                   ].map((tab) => (
@@ -3315,31 +3311,37 @@ function App() {
                   </div>
                 </div>
               )}
-            </div>
-          </div>
-        )
-      case 'Cámaras RTSP':
-        return (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
-                <svg className="w-8 h-8 mr-3 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                Visor de Cámaras RTSP
-              </h2>
-            </div>
 
-            {/* Galería de Cámaras */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-              <RTSPCameraGallery apiUrl={API_URL} />
-            </div>
+              {configTab === 'rtsp' && (
+                <div className="p-8">
+                  <RTSPManager />
+                </div>
+              )}
 
-            {/* Información */}
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-              <p className="text-sm text-blue-800 dark:text-blue-200">
-                <strong>💡 Tip:</strong> Configura cámaras RTSP en la sección de configuración y luego visualiza los streams aquí en tiempo real con auto-reconexión automática.
-              </p>
+              {configTab === 'camera-streaming' && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
+                      <svg className="w-8 h-8 mr-3 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                      Visor de Cámaras en Streaming
+                    </h2>
+                  </div>
+
+                  {/* Galería de Cámaras */}
+                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+                    <RTSPCameraGallery apiUrl={API_URL} />
+                  </div>
+
+                  {/* Información */}
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <p className="text-sm text-blue-800 dark:text-blue-200">
+                      <strong>💡 Tip:</strong> Configura cámaras RTSP en la sección de configuración de cámaras y luego visualiza los streams aquí en tiempo real con auto-reconexión automática.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )
