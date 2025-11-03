@@ -4,6 +4,7 @@ import axios from 'axios'
 import Navbar from './components/Navbar'
 import SensorManagement from './components/SensorManagement'
 import MqttConnectionStatus from './components/MqttConnectionStatus'
+import RTSPManager from './components/RTSPManager'
 import { useFormValidation, validationRules } from './hooks/useFormValidation'
 
 // API URL - use environment variable for Docker deployment
@@ -1665,6 +1666,12 @@ function App() {
               onSensorUpdate={fetchSensors}
               onTopicUpdate={fetchTopics}
             />
+          </div>
+        )
+      case 'RTSP':
+        return (
+          <div className="p-8">
+            <RTSPManager />
           </div>
         )
       case 'Configuración':
