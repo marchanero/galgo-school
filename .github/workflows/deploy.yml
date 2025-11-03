@@ -127,3 +127,81 @@ jobs:
         run: |
           echo "📋 Últimos 100 líneas de logs:"
           docker compose logs --tail=100
+
+      - name: Wait for services to be healthy
+        run: |
+          echo "⏳ Esperando a que los servicios estén saludables..."
+          
+          # Configuración
+          MAX_ATTEMPTS=30
+          WAIT_TIME=2
+          SERVER_URL="http://localhost:3000"
+          
+          # Función para verificar salud
+          check_health() {
+            if curl -sf "$SERVER_URL/health" > /dev/null 2>&1; then
+              return 0
+            else
+              return 1
+            fi
+          }
+          
+          # Intentar conexión
+          for ((i=1; i<=MAX_ATTEMPTS; i++)); do
+            echo "  Intento $i/$MAX_ATTEMPTS..."
+            
+            if check_health; then
+              echo "✅ Servidor saludable"
+              exit 0
+            fi
+            
+            # Mostrar estado de contenedores
+            if [ $((i % 5)) -eq 0 ]; then
+              echo "  Estado de contenedores:"
+              docker compose ps | tail -5
+            fi
+            
+            if [ $i -lt $MAX_ATTEMPTS ]; then
+              sleep $WAIT_TIME
+            fi
+          done
+          
+          echo "❌ Timeout: Servidor no respondió después de $((MAX_ATTEMPTS * WAIT_TIME)) segundos"
+          echo "📋 Estado final de contenedores:"
+          docker compose ps
+          echo "📋 Logs de error:"
+          docker compose logs | tail -30
+          exit 1
+
+      - name: Verify all services are running
+        run: |
+          echo "🔍 Verificando que todos los servicios estén corriendo..."
+          
+          # Verificar que no hay contenedores parados
+          stopped=$(docker compose ps -q --filter "status=exited" 2>/dev/null | wc -l)
+          running=$(docker compose ps -q --filter "status=running" 2>/dev/null | wc -l)
+          
+          echo "  Contenedores corriendo: $running"
+          echo "  Contenedores parados: $stopped"
+          
+          if [ "$stopped" -gt 0 ]; then
+            echo "❌ Hay contenedores parados"
+            docker compose ps
+            exit 1
+          fi
+          
+          echo "✅ Todos los servicios están corriendo"
+
+      - name: Deployment Summary
+        run: |
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "✅ DEPLOYMENT SUCCESSFUL"
+          echo "════════════════════════════════════════"
+          echo "📦 Contenedores activos:"
+          docker compose ps --format "table {{.Names}}\t{{.Status}}"
+          echo ""
+          echo "🔗 Servicios disponibles:"
+          echo "  - API: http://localhost:3000"
+          echo "  - Cliente: http://localhost:5173"
+          echo "════════════════════════════════════════"
