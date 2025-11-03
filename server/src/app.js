@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpecs = require('./config/swagger');
 const appConfig = require('./config/app.config');
@@ -37,6 +38,21 @@ app.use(cors(appConfig.cors));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(logger);
+
+// Servir archivos estáticos desde la carpeta public (para HLS)
+app.use('/hls', express.static(path.join(__dirname, '../public/hls'), {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.m3u8')) {
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    } else if (path.endsWith('.ts')) {
+      res.setHeader('Content-Type', 'video/mp2t');
+      res.setHeader('Cache-Control', 'public, max-age=10');
+    }
+  }
+}));
 
 // Swagger UI
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs, {

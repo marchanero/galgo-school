@@ -134,8 +134,16 @@ const RTSPCameraGallery = ({ apiUrl }) => {
   // Proteger contra errores cuando no hay URL o apiUrl
   let fullHlsUrl = null;
   try {
-    if (activeHlsPath && apiUrl) {
-      fullHlsUrl = new URL(activeHlsPath, apiUrl).href;
+    if (activeHlsPath) {
+      // En desarrollo con proxy, usar URLs relativas
+      // En producción, usar URLs absolutas con apiUrl
+      if (!apiUrl || apiUrl === '') {
+        // Modo desarrollo con proxy - usar URL relativa
+        fullHlsUrl = activeHlsPath;
+      } else {
+        // Modo producción - construir URL absoluta
+        fullHlsUrl = new URL(activeHlsPath, apiUrl).href;
+      }
     }
   } catch (error) {
     console.error('❌ Error construyendo URL HLS:', error);

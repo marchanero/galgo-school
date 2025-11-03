@@ -138,7 +138,13 @@ class StreamController {
         });
       }
 
-      const content = fs.readFileSync(hlsPath, 'utf8');
+      let content = fs.readFileSync(hlsPath, 'utf8');
+
+      // Modificar las URLs de los segmentos para que apunten a los endpoints correctos
+      // Cambiar líneas como "camera_1_000.ts" por "/api/stream/segment/1/000.ts"
+      content = content.replace(/camera_(\d+)_(\d+)\.ts/g, (match, cameraId, segmentNum) => {
+        return `/api/stream/segment/${cameraId}/${segmentNum}.ts`;
+      });
 
       res.set('Content-Type', 'application/vnd.apple.mpegurl');
       res.set('Cache-Control', 'no-cache, no-store, must-revalidate');

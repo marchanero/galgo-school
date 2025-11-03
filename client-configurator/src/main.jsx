@@ -7,7 +7,7 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import { SensorProvider } from './contexts/SensorContext'
 import { Toaster } from 'react-hot-toast'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3001'
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
