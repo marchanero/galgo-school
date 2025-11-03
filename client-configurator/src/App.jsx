@@ -8,6 +8,15 @@ import RTSPManager from './components/RTSPManager'
 import RTSPCameraGallery from './components/RTSPCameraGallery'
 import { useFormValidation, validationRules } from './hooks/useFormValidation'
 import { usePersistedConfig } from './hooks/usePersistedConfig'
+import { 
+  validateIPv4, 
+  validatePort, 
+  validateRTSPUrl, 
+  validateHostname,
+  validateCameraConfig,
+  validateMQTTConfig,
+  formatValidationErrors 
+} from './utils/validators'
 
 // API URL - use environment variable for Docker deployment
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3001'
@@ -1047,6 +1056,83 @@ function App() {
     }))
   }
 
+  // Validar y actualizar configuración MQTT con validación robusta
+  const updateMQTTConfiguration = (field, value) => {
+    // Get the current MQTT config with the new value
+    const updatedMqtt = {
+      ...configurations.mqtt,
+      [field]: value
+    }
+
+    // Only validate critical fields
+    if (['host', 'port', 'username', 'password'].includes(field)) {
+      const validation = validateMQTTConfig(updatedMqtt)
+
+      if (!validation.valid) {
+        const errorMessage = Object.entries(validation.errors)
+          .map(([fieldName, error]) => `${fieldName}: ${error}`)
+          .join('\n')
+        
+        toast.error(`⚠️ Validación MQTT fallida:\n${errorMessage}`, {
+          duration: 5000,
+          icon: '❌'
+        })
+        return false
+      }
+    }
+
+    // If validation passes (or not needed), update the configuration
+    updateConfiguration('mqtt', field, value)
+    
+    // Show success feedback for critical field changes
+    if (['host', 'port'].includes(field)) {
+      const fieldLabel = field === 'host' ? 'Host del broker' : 'Puerto MQTT'
+      toast.success(`✅ ${fieldLabel} actualizado`, {
+        duration: 2000,
+        icon: '🔧'
+      })
+    }
+
+    return true
+  }
+
+  // Aplicar configuración predefinida de broker MQTT con validación
+  const applyMQTTPreset = (preset) => {
+    // Validate the preset configuration
+    const validation = validateMQTTConfig({
+      host: preset.host,
+      port: preset.port,
+      username: preset.username || '',
+      password: preset.password || '',
+      ssl: preset.ssl || false
+    })
+
+    if (!validation.valid) {
+      const errorMessage = Object.entries(validation.errors)
+        .map(([field, error]) => `${field}: ${error}`)
+        .join('\n')
+      toast.error(`⚠️ Validación de preset fallida:\n${errorMessage}`, {
+        duration: 5000,
+        icon: '❌'
+      })
+      return false
+    }
+
+    // Apply the preset configuration
+    updateConfiguration('mqtt', 'host', preset.host)
+    updateConfiguration('mqtt', 'port', preset.port)
+    updateConfiguration('mqtt', 'username', preset.username)
+    updateConfiguration('mqtt', 'password', preset.password)
+    updateConfiguration('mqtt', 'ssl', preset.ssl)
+    updateConfiguration('mqtt', 'defaultBroker', `${preset.name} (${preset.host}:${preset.port})`)
+
+    toast.success(`✅ Configuración "${preset.name}" aplicada`, { 
+      duration: 3000,
+      icon: '⚙️'
+    })
+    return true
+  }
+
   const saveAllConfigurations = useCallback(async () => {
     const toastId = toast.loading('💾 Guardando configuración...', { duration: 30000 })
     
@@ -1089,19 +1175,40 @@ function App() {
 
   // Camera IP management functions
   const addCameraIP = () => {
-    if (!newCameraIP.name || !newCameraIP.ip) {
-      toast.error('Nombre e IP son requeridos', { duration: 3000 })
+    // Validar usando el validador centralizado
+    const validation = validateCameraConfig({
+      name: newCameraIP.name,
+      ip: newCameraIP.ip,
+      port: newCameraIP.port,
+      username: newCameraIP.username,
+      password: newCameraIP.password,
+      path: newCameraIP.path
+    })
+
+    if (!validation.valid) {
+      const errorMessage = Object.entries(validation.errors)
+        .map(([field, error]) => `${field}: ${error}`)
+        .join('\n')
+      
+      toast.error(`❌ Validación fallida:\n${errorMessage}`, { 
+        duration: 5000,
+        icon: '⚠️'
+      })
       return
     }
 
     const newCamera = {
       id: Date.now().toString(),
-      ...newCameraIP
+      ...newCameraIP,
+      port: String(newCameraIP.port) // Asegurar que es string
     }
 
     setCameraIPs(prev => [...prev, newCamera])
-    setNewCameraIP({ name: '', ip: '', port: '554', username: '', password: '' })
-    toast.success('IP de cámara agregada', { duration: 3000 })
+    setNewCameraIP({ name: '', ip: '', port: '554', username: '', password: '', path: '' })
+    toast.success('✅ Cámara RTSP agregada exitosamente', { 
+      duration: 3000,
+      icon: '📹'
+    })
   }
 
   const removeCameraIP = (id) => {
@@ -1110,10 +1217,48 @@ function App() {
   }
 
   const updateCameraIP = (id, updates) => {
+    // Get the camera to update
+    const cameraToUpdate = cameraIPs.find(c => c.id === id)
+    if (!cameraToUpdate) {
+      toast.error('❌ Cámara no encontrada', { duration: 3000 })
+      return
+    }
+
+    // Merge updates with existing camera data for validation
+    const updatedCamera = { ...cameraToUpdate, ...updates }
+
+    // Validate if any IP/port/auth fields are being updated
+    if (updates.ip || updates.port || updates.username !== undefined || updates.password !== undefined) {
+      const validation = validateCameraConfig({
+        name: updatedCamera.name,
+        ip: updatedCamera.ip,
+        port: updatedCamera.port || cameraToUpdate.port,
+        username: updatedCamera.username,
+        password: updatedCamera.password
+      })
+
+      if (!validation.valid) {
+        const errorMessage = Object.entries(validation.errors)
+          .map(([field, error]) => `${field}: ${error}`)
+          .join('\n')
+        toast.error(`⚠️ Validación fallida:\n${errorMessage}`, {
+          duration: 5000,
+          icon: '❌'
+        })
+        return
+      }
+    }
+
+    // If only updating name, no validation needed
     setCameraIPs(prev => prev.map(camera => 
       camera.id === id ? { ...camera, ...updates } : camera
     ))
-    toast.success('IP de cámara actualizada', { duration: 3000 })
+    
+    const updateType = updates.name ? 'nombre' : updates.ip ? 'IP' : updates.port ? 'puerto' : 'datos'
+    toast.success(`✅ Cámara actualizada (${updateType})`, { 
+      duration: 3000,
+      icon: '🎥'
+    })
   }
 
   const renderDataFields = (sensorType, form) => {
@@ -2705,21 +2850,14 @@ function App() {
                             description: 'AWS IoT Core (requiere configuración)'
                           }
                         ].map((preset, index) => {
-                          const isDefault = configurations.mqtt.defaultBroker === preset.name
+                          const isDefault = configurations.mqtt.defaultBroker.includes(preset.name)
                           return (
                             <div key={index} className="relative">
                               <button
-                                onClick={() => {
-                                  updateConfiguration('mqtt', 'host', preset.host)
-                                  updateConfiguration('mqtt', 'port', preset.port)
-                                  updateConfiguration('mqtt', 'username', preset.username)
-                                  updateConfiguration('mqtt', 'password', preset.password)
-                                  updateConfiguration('mqtt', 'ssl', preset.ssl)
-                                  toast.success(`Configuración "${preset.name}" aplicada`, { duration: 2000 })
-                                }}
+                                onClick={() => applyMQTTPreset(preset)}
                                 className={`w-full p-4 bg-white dark:bg-gray-700 rounded-lg border hover:shadow-md transition-all text-left group ${
                                   isDefault 
-                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' 
+                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 ring-2 ring-blue-300' 
                                     : 'border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-600'
                                 }`}
                               >
@@ -2892,10 +3030,11 @@ function App() {
                           <input
                             type="text"
                             value={configurations.mqtt.host}
-                            onChange={(e) => updateConfiguration('mqtt', 'host', e.target.value)}
+                            onChange={(e) => updateMQTTConfiguration('host', e.target.value)}
                             placeholder="ej: 100.107.238.60"
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                           />
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Dirección IP, hostname o dominio del broker MQTT</p>
                         </div>
 
                         <div>
@@ -2903,10 +3042,11 @@ function App() {
                           <input
                             type="number"
                             value={configurations.mqtt.port}
-                            onChange={(e) => updateConfiguration('mqtt', 'port', parseInt(e.target.value))}
+                            onChange={(e) => updateMQTTConfiguration('port', parseInt(e.target.value))}
                             placeholder="1883"
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                           />
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Puerto MQTT (1883 sin SSL, 8883 con SSL)</p>
                         </div>
 
                         <div className="flex items-center space-x-3">
@@ -2926,10 +3066,11 @@ function App() {
                           <input
                             type="text"
                             value={configurations.mqtt.username}
-                            onChange={(e) => updateConfiguration('mqtt', 'username', e.target.value)}
+                            onChange={(e) => updateMQTTConfiguration('username', e.target.value)}
                             placeholder="admin"
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                           />
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Máx 100 caracteres</p>
                         </div>
 
                         <div>
@@ -2937,10 +3078,11 @@ function App() {
                           <input
                             type="password"
                             value={configurations.mqtt.password}
-                            onChange={(e) => updateConfiguration('mqtt', 'password', e.target.value)}
+                            onChange={(e) => updateMQTTConfiguration('password', e.target.value)}
                             placeholder="••••••••"
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                           />
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Máx 256 caracteres</p>
                         </div>
 
                           <button
