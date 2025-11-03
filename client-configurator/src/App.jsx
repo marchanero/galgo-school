@@ -491,6 +491,35 @@ function App() {
     }))
   }, [cameraIPs])
 
+  // Polling del estado de conexión MQTT cuando estamos en la tab de MQTT
+  useEffect(() => {
+    if (configTab !== 'mqtt') return
+
+    const pollMQTTStatus = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/mqtt/status`)
+        if (response.ok) {
+          const data = await response.json()
+          setMqttStatus(prev => ({
+            ...prev,
+            connected: data.connected || false,
+            broker: data.broker || 'Sin conectar',
+            clientId: data.clientId || '',
+            lastChecked: new Date().toISOString()
+          }))
+        }
+      } catch (error) {
+        console.error('Error polling MQTT status:', error)
+      }
+    }
+
+    // Poll immediately and then every 5 seconds
+    pollMQTTStatus()
+    const interval = setInterval(pollMQTTStatus, 5000)
+
+    return () => clearInterval(interval)
+  }, [configTab])
+
   const [elapsedTime, setElapsedTime] = useState(0)
 
   useEffect(() => {
@@ -854,7 +883,28 @@ function App() {
 
   // MQTT Connection Functions
   const handleConnect = async () => {
+    // Validate configuration before connecting
+    const validation = validateMQTTConfig({
+      host: configurations.mqtt.host,
+      port: configurations.mqtt.port,
+      username: configurations.mqtt.username,
+      password: configurations.mqtt.password,
+      ssl: configurations.mqtt.ssl
+    })
+
+    if (!validation.valid) {
+      const errorMessage = Object.entries(validation.errors)
+        .map(([field, error]) => `${field}: ${error}`)
+        .join('\n')
+      toast.error(`⚠️ Configuración inválida:\n${errorMessage}`, {
+        duration: 5000,
+        icon: '❌'
+      })
+      return
+    }
+
     setMqttConnecting(true)
+    const toastId = toast.loading('🔗 Conectando al broker MQTT...', { duration: 30000 })
 
     try {
       // Build MQTT broker URL
@@ -862,11 +912,6 @@ function App() {
       const brokerUrl = `${protocol}://${configurations.mqtt.host}:${configurations.mqtt.port}`
 
       console.log(`Connecting to MQTT broker: ${brokerUrl}`)
-      console.log('Host:', configurations.mqtt.host)
-      console.log('Port:', configurations.mqtt.port)
-      console.log('Username:', configurations.mqtt.username)
-      console.log('Password:', configurations.mqtt.password ? '***' : 'empty')
-      console.log('SSL:', configurations.mqtt.ssl)
 
       const requestBody = {
         broker: brokerUrl,
@@ -874,11 +919,6 @@ function App() {
         password: configurations.mqtt.password || undefined,
         ssl: configurations.mqtt.ssl
       }
-
-      console.log('Request body:', JSON.stringify(requestBody, (key, value) => {
-        if (key === 'password') return value ? '***' : undefined
-        return value
-      }))
 
       const response = await fetch(`${API_URL}/api/mqtt/connect`, {
         method: 'POST',
@@ -893,9 +933,14 @@ function App() {
           ...prev,
           connected: true,
           broker: brokerUrl,
+          clientId: data.clientId || '',
           lastChecked: new Date().toISOString()
         }))
-        toast.success('Conectado exitosamente al broker MQTT', { duration: 3000 })
+        toast.success(`✅ Conectado exitosamente a ${configurations.mqtt.host}:${configurations.mqtt.port}`, { 
+          id: toastId,
+          duration: 3000,
+          icon: '🔗'
+        })
       } else {
         throw new Error(data.message || 'Error al conectar')
       }
@@ -906,7 +951,11 @@ function App() {
         connected: false,
         lastChecked: new Date().toISOString()
       }))
-      toast.error(`Error de conexión MQTT: ${error.message}`, { duration: 5000 })
+      toast.error(`❌ Error de conexión MQTT: ${error.message}`, { 
+        id: toastId,
+        duration: 5000,
+        icon: '🚫'
+      })
     } finally {
       setMqttConnecting(false)
     }
@@ -914,6 +963,7 @@ function App() {
 
   const handleDisconnect = async () => {
     setMqttConnecting(true)
+    const toastId = toast.loading('🔌 Desconectando del broker...', { duration: 30000 })
 
     try {
       const response = await fetch(`${API_URL}/api/mqtt/disconnect`, {
@@ -926,7 +976,11 @@ function App() {
           connected: false,
           lastChecked: new Date().toISOString()
         }))
-        toast.success('Desconectado del broker MQTT', { duration: 3000 })
+        toast.success('✅ Desconectado del broker MQTT', { 
+          id: toastId,
+          duration: 3000,
+          icon: '🔌'
+        })
       } else {
         const errorData = await response.json()
         throw new Error(errorData.message || 'Error al desconectar')
