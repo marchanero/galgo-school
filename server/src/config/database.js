@@ -69,9 +69,26 @@ const createTables = () => {
     value TEXT,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(category, key)
+  )`);
+
+  // RTSP Cameras table
+  db.run(`CREATE TABLE IF NOT EXISTS rtsp_cameras (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    ip TEXT NOT NULL,
+    port INTEGER DEFAULT 554,
+    username TEXT,
+    password TEXT,
+    path TEXT DEFAULT '/',
+    protocol TEXT DEFAULT 'rtsp',
+    enabled BOOLEAN DEFAULT 1,
+    last_connection_status TEXT DEFAULT 'unknown',
+    last_connection_time DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`, (err) => {
     if (err) {
-      console.error('Error creating configurations table:', err);
+      console.error('Error creating rtsp_cameras table:', err);
     } else {
       console.log('Database tables initialized successfully.');
     }
