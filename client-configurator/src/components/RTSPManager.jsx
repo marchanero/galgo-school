@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { useSensors } from '../hooks/useSensors';
 
 const RTSPManager = () => {
-  const [cameras, setCameras] = useState([]);
+  const { cameras, addCamera, deleteCamera, updateCamera } = useSensors();
   const [selectedCamera, setSelectedCamera] = useState(null);
   const [loading, setLoading] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -11,6 +12,7 @@ const RTSPManager = () => {
 
   // Formulario para agregar nueva cámara
   const [showForm, setShowForm] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     ip: '',
@@ -23,23 +25,6 @@ const RTSPManager = () => {
 
   const API_URL = 'http://localhost:3001';
 
-  // Cargar cámaras al montar el componente
-  useEffect(() => {
-    loadCameras();
-    const interval = setInterval(loadCameras, 30000); // Recargar cada 30 segundos
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadCameras = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/api/rtsp/cameras`);
-      setCameras(response.data.cameras);
-    } catch (error) {
-      console.error('Error loading cameras:', error);
-      toast.error('Error al cargar cámaras');
-    }
-  };
-
   const handleFormChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -51,15 +36,47 @@ const RTSPManager = () => {
   const handleAddCamera = async (e) => {
     e.preventDefault();
 
-    if (!formData.name || !formData.ip) {
-      toast.error('Nombre e IP son requeridos');
+    // Validaciones del frontend
+    const errors = [];
+
+    if (!formData.name.trim()) {
+      errors.push('El nombre es requerido');
+    } else if (formData.name.trim().length < 2) {
+      errors.push('El nombre debe tener al menos 2 caracteres');
+    }
+
+    if (!formData.ip.trim()) {
+      errors.push('La dirección IP es requerida');
+    } else if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(formData.ip.trim())) {
+      errors.push('Formato de IP inválido');
+    } else {
+      const parts = formData.ip.trim().split('.');
+      if (parts.some(part => parseInt(part) > 255)) {
+        errors.push('Cada octeto de la IP debe ser menor o igual a 255');
+      }
+    }
+
+    if (formData.port < 1 || formData.port > 65535) {
+      errors.push('El puerto debe estar entre 1 y 65535');
+    }
+
+    if (formData.path && !formData.path.startsWith('/')) {
+      errors.push('La ruta debe comenzar con /');
+    }
+
+    if (errors.length > 0) {
+      toast.error(`Errores de validación: ${errors.join(', ')}`);
       return;
     }
 
     setLoading(true);
     try {
-      const response = await axios.post(`${API_URL}/api/rtsp/cameras`, formData);
-      setCameras([response.data.camera, ...cameras]);
+      await addCamera({
+        ...formData,
+        name: formData.name.trim(),
+        ip: formData.ip.trim(),
+        path: formData.path || '/'
+      });
       setFormData({
         name: '',
         ip: '',
@@ -72,7 +89,7 @@ const RTSPManager = () => {
       setShowForm(false);
       toast.success('Cámara agregada exitosamente');
     } catch (error) {
-      const message = error.response?.data?.error || 'Error al agregar cámara';
+      const message = error.message || 'Error al agregar cámara';
       toast.error(message);
     } finally {
       setLoading(false);
@@ -86,15 +103,14 @@ const RTSPManager = () => {
 
     setLoading(true);
     try {
-      await axios.delete(`${API_URL}/api/rtsp/cameras/${cameraId}`);
-      setCameras(cameras.filter(c => c.id !== cameraId));
+      await deleteCamera(cameraId);
       if (selectedCamera?.id === cameraId) {
         setSelectedCamera(null);
         setTestResult(null);
         setStreamInfo(null);
       }
       toast.success('Cámara eliminada exitosamente');
-    } catch (error) {
+    } catch {
       toast.error('Error al eliminar cámara');
     } finally {
       setLoading(false);
@@ -103,15 +119,113 @@ const RTSPManager = () => {
 
   const handleToggleCamera = async (cameraId, currentStatus) => {
     try {
-      await axios.post(`${API_URL}/api/rtsp/cameras/${cameraId}/toggle`, {
-        enabled: !currentStatus
-      });
-      loadCameras();
-      toast.success(currentStatus ? 'Cámara deshabilitada' : 'Cámara habilitada');
-    } catch (error) {
+      const cameraToUpdate = cameras.find(c => c.id === cameraId);
+      if (cameraToUpdate) {
+        await updateCamera(cameraId, { enabled: !currentStatus });
+        toast.success(currentStatus ? 'Cámara deshabilitada' : 'Cámara habilitada');
+      }
+    } catch {
       toast.error('Error al cambiar estado de cámara');
     }
   };
+
+  const handleEditCamera = (camera) => {
+    setIsEditing(true);
+    setFormData({
+      name: camera.name,
+      ip: camera.ip,
+      port: camera.port,
+      username: camera.username || '',
+      password: camera.password || '',
+      path: camera.path || '/',
+      protocol: camera.protocol || 'rtsp'
+    });
+    setShowForm(true);
+  };
+
+  const handleSaveCamera = async (e) => {
+    e.preventDefault();
+
+    // Validaciones del frontend
+    const errors = [];
+
+    if (!formData.name.trim()) {
+      errors.push('El nombre es requerido');
+    } else if (formData.name.trim().length < 2) {
+      errors.push('El nombre debe tener al menos 2 caracteres');
+    }
+
+    if (!formData.ip.trim()) {
+      errors.push('La dirección IP es requerida');
+    } else if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(formData.ip.trim())) {
+      errors.push('Formato de IP inválido');
+    } else {
+      const parts = formData.ip.trim().split('.');
+      if (parts.some(part => parseInt(part) > 255)) {
+        errors.push('Cada octeto de la IP debe ser menor o igual a 255');
+      }
+    }
+
+    if (formData.port < 1 || formData.port > 65535) {
+      errors.push('El puerto debe estar entre 1 y 65535');
+    }
+
+    if (formData.path && !formData.path.startsWith('/')) {
+      errors.push('La ruta debe comenzar con /');
+    }
+
+    if (errors.length > 0) {
+      toast.error(`Errores de validación: ${errors.join(', ')}`);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Preparar datos para actualizar
+      const updateData = {
+        name: formData.name.trim(),
+        ip: formData.ip.trim(),
+        port: formData.port,
+        username: formData.username?.trim() || '',
+        password: formData.password || '',
+        path: (formData.path || '/').trim() || '/',  // Asegurar que siempre hay una ruta válida
+        protocol: formData.protocol || 'rtsp'
+      };
+
+      console.log('📤 Datos a enviar:', updateData);
+      
+      if (!isEditing || !selectedCamera) {
+        toast.error('Error: No hay cámara seleccionada para editar');
+        return;
+      }
+      
+      await updateCamera(selectedCamera.id, updateData);
+      
+      setSelectedCamera({
+        ...selectedCamera,
+        ...formData
+      });
+      
+      setFormData({
+        name: '',
+        ip: '',
+        port: 554,
+        username: '',
+        password: '',
+        path: '/',
+        protocol: 'rtsp'
+      });
+      setShowForm(false);
+      setIsEditing(false);
+      toast.success('Cámara actualizada exitosamente');
+    } catch (error) {
+      const message = error.message || 'Error al actualizar cámara';
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   const testConnection = async (camera) => {
     setSelectedCamera(camera);
@@ -128,10 +242,10 @@ const RTSPManager = () => {
       } else {
         toast.error('No se pudo conectar a la cámara');
       }
-    } catch (error) {
+    } catch (err) {
       setTestResult({
         success: false,
-        message: error.response?.data?.error || 'Error al probar conexión'
+        message: err.response?.data?.error || 'Error al probar conexión'
       });
       toast.error('Error al probar conexión');
     } finally {
@@ -144,7 +258,7 @@ const RTSPManager = () => {
       const response = await axios.get(`${API_URL}/api/rtsp/cameras/${camera.id}/stream-info`);
       setStreamInfo(response.data.stream_info);
       toast.success('Información de stream obtenida');
-    } catch (error) {
+    } catch {
       toast.error('Error al obtener información del stream');
     }
   };
@@ -184,12 +298,34 @@ const RTSPManager = () => {
         {showForm ? '✕ Cancelar' : '+ Agregar Cámara'}
       </button>
 
-      {/* Formulario para agregar cámara */}
+      {/* Formulario para agregar/editar cámara */}
       {showForm && (
         <div className="bg-white rounded-lg shadow-lg p-6 mb-8 border border-blue-200">
-          <h2 className="text-2xl font-semibold mb-4">Nueva Cámara RTSP</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-2xl font-semibold">
+              {isEditing && selectedCamera ? `Editar: ${selectedCamera.name}` : 'Nueva Cámara RTSP'}
+            </h2>
+            <button
+              onClick={() => {
+                setShowForm(false);
+                setIsEditing(false);
+                setFormData({
+                  name: '',
+                  ip: '',
+                  port: 554,
+                  username: '',
+                  password: '',
+                  path: '/',
+                  protocol: 'rtsp'
+                });
+              }}
+              className="text-gray-500 hover:text-gray-700 text-2xl"
+            >
+              ✕
+            </button>
+          </div>
 
-          <form onSubmit={handleAddCamera} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <form onSubmit={isEditing ? handleSaveCamera : handleAddCamera} className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Nombre de la Cámara *
@@ -295,9 +431,16 @@ const RTSPManager = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-semibold transition disabled:opacity-50"
+                className={`w-full text-white py-2 rounded-lg font-semibold transition disabled:opacity-50 ${
+                  isEditing
+                    ? 'bg-orange-600 hover:bg-orange-700'
+                    : 'bg-green-600 hover:bg-green-700'
+                }`}
               >
-                {loading ? 'Agregando...' : 'Agregar Cámara'}
+                {loading 
+                  ? (isEditing ? 'Actualizando...' : 'Agregando...')
+                  : (isEditing ? 'Actualizar Cámara' : 'Agregar Cámara')
+                }
               </button>
             </div>
           </form>
@@ -358,6 +501,17 @@ const RTSPManager = () => {
                   className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded text-sm disabled:opacity-50 transition"
                 >
                   ℹ️ Info
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEditCamera(camera);
+                  }}
+                  disabled={loading}
+                  className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded text-sm disabled:opacity-50 transition"
+                >
+                  ✏️ Editar
                 </button>
 
                 <button

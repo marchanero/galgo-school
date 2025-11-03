@@ -1,71 +1,26 @@
 import { useState, useEffect, useCallback } from 'react';
 import VideoPreview from './VideoPreview';
+import { useSensors } from '../hooks/useSensors';
 import toast from 'react-hot-toast';
 
 /**
  * Componente para gestionar y mostrar múltiples cámaras RTSP
- * @param {string} apiUrl - URL del servidor API
- * @param {Array} configuredCameras - Cámaras configuradas del sistema (prop from App.jsx)
- * @param {Object} cameraConfig - Configuración global de cámaras
+ * Usa SensorContext para sincronización centralizada
  */
-const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }) => {
-  const [cameras, setCameras] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [activeCameraId, setActiveCameraId] = useState(null);
-  const [streamStatus, setStreamStatus] = useState({});
+const RTSPCameraGallery = ({ apiUrl }) => {
+  // Obtener cámaras del contexto
+  const { cameras, camerasLoading, camerasError } = useSensors()
+  
+  const [activeCameraId, setActiveCameraId] = useState(null)
+  const [streamStatus, setStreamStatus] = useState({})
 
-  // Cargar cámaras desde props o API
-  const loadCameras = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      let loadedCameras = [];
-
-      // Si hay cámaras configuradas en props, usarlas
-      if (configuredCameras && configuredCameras.length > 0) {
-        console.log(`📹 Cargando ${configuredCameras.length} cámaras configuradas...`);
-        loadedCameras = configuredCameras.map(cam => ({
-          id: cam.id,
-          name: cam.name,
-          ip: cam.ip,
-          port: cam.port || 554,
-          username: cam.username || '',
-          password: cam.password || '',
-          path: cam.path || '/stream',
-          rtspUrl: `rtsp://${cam.username}${cam.password ? ':' + cam.password : ''}${cam.username ? '@' : ''}${cam.ip}:${cam.port}${cam.path || '/stream'}`,
-          connectionTimeout: cameraConfig?.connectionTimeout || 10,
-          autoReconnect: cameraConfig?.autoReconnect !== false
-        }));
-        console.log('✅ Cámaras cargadas desde props:', loadedCameras);
-      } else {
-        // Si no hay props, intentar cargar del API
-        console.log('🔄 Intentando cargar cámaras del API...');
-        const response = await fetch(`${apiUrl}/api/cameras`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        loadedCameras = data;
-        console.log('✅ Cámaras cargadas del API:', loadedCameras);
-      }
-
-      setCameras(loadedCameras);
-      if (loadedCameras.length > 0 && !activeCameraId) {
-        setActiveCameraId(loadedCameras[0].id);
-        console.log(`📌 Cámara activa seleccionada: ${loadedCameras[0].name}`);
-      }
-    } catch (err) {
-      console.error('❌ Error cargando cámaras:', err);
-      setError(err.message);
-      toast.error(`Error al cargar cámaras: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [apiUrl, configuredCameras, cameraConfig, activeCameraId]);
-
+  // Sincronizar cámaras del contexto
   useEffect(() => {
-    loadCameras();
-  }, [loadCameras]);
+    if (cameras && cameras.length > 0 && !activeCameraId) {
+      setActiveCameraId(cameras[0].id);
+      console.log(`📌 Cámara activa seleccionada: ${cameras[0].name}`);
+    }
+  }, [cameras, activeCameraId]);
 
   // Iniciar streaming para una cámara con reintentos
   const startStreamPreview = async (cameraId, maxRetries = 2) => {
@@ -78,6 +33,8 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
       try {
         console.log(`🔄 Intento ${attempt}/${maxRetries + 1} - Iniciando stream para cámara "${camera.name}" (${camera.ip}:${camera.port})`);
+        
+        // Establecer estado de conexión
         setStreamStatus(prev => ({
           ...prev,
           [cameraId]: { status: 'connecting', hlsUrl: null, error: null, attempt }
@@ -94,10 +51,13 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
 
         const data = await response.json();
         console.log(`✅ Stream iniciado exitosamente para ${camera.name}:`, data);
+        
+        // Actualizar estado con la URL del stream
         setStreamStatus(prev => ({
           ...prev,
           [cameraId]: { status: 'connected', hlsUrl: data.hlsUrl, error: null }
         }));
+        
         toast.success(`✅ Stream de "${camera.name}" iniciado correctamente`);
         return data.hlsUrl;
       } catch (err) {
@@ -154,19 +114,50 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
   };
 
   // Manejo de cambio de estado
-  const handleCameraStatusChange = (cameraId, status) => {
+  const handleCameraStatusChange = useCallback((cameraId, status) => {
     setStreamStatus((prev) => ({
       ...prev,
       [cameraId]: status,
     }));
-  };
+  }, []);
+
+  // Callback estable para manejar cambios de estado de la cámara activa
+  const handleActiveCameraStatusChange = useCallback((status) => {
+    handleCameraStatusChange(activeCameraId, status);
+  }, [activeCameraId, handleCameraStatusChange]);
 
   // Obtener cámara activa
   const activeCamera = cameras.find((c) => c.id === activeCameraId);
   const activeStreamStatus = streamStatus[activeCameraId];
   const activeHlsPath = activeStreamStatus?.hlsUrl;
+  
+  // Proteger contra errores cuando no hay URL o apiUrl
+  let fullHlsUrl = null;
+  try {
+    if (activeHlsPath) {
+      // En desarrollo con proxy, usar URLs relativas
+      // En producción, usar URLs absolutas con apiUrl
+      if (!apiUrl || apiUrl === '') {
+        // Modo desarrollo con proxy - usar URL relativa
+        fullHlsUrl = activeHlsPath;
+      } else {
+        // Modo producción - construir URL absoluta
+        fullHlsUrl = new URL(activeHlsPath, apiUrl).href;
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error construyendo URL HLS:', error);
+  }
 
-  if (loading) {
+  // Log cuando cambia activeHlsPath o fullHlsUrl
+  useEffect(() => {
+    if (activeHlsPath) {
+      console.log('🎬 RTSPCameraGallery - activeHlsPath cambió:', activeHlsPath);
+      console.log('🎬 RTSPCameraGallery - fullHlsUrl:', fullHlsUrl);
+    }
+  }, [activeHlsPath, fullHlsUrl]);
+
+  if (camerasLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
@@ -174,16 +165,10 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
     );
   }
 
-  if (error) {
+  if (camerasError) {
     return (
       <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-        <p className="text-red-800 dark:text-red-200">Error: {error}</p>
-        <button
-          onClick={loadCameras}
-          className="mt-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-        >
-          Reintentar
-        </button>
+        <p className="text-red-800 dark:text-red-200">Error: {camerasError}</p>
       </div>
     );
   }
@@ -213,35 +198,27 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
   return (
     <div className="space-y-6">
       {/* Video Preview Principal */}
-      {activeCamera && (
+      {activeCamera ? (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-              {activeCamera.name}
+              {activeCamera.name || 'Cámara sin nombre'}
             </h3>
             <div className="flex gap-2">
               {!activeHlsPath ? (
                 <button
-                  onClick={() =>
-                    startStreamPreview(activeCameraId).then((hlsUrl) => {
-                      setStreamStatus((prev) => ({
-                        ...prev,
-                        [activeCameraId]: {
-                          status: 'connecting',
-                          hlsUrl,
-                          cameraId: activeCameraId,
-                          error: null,
-                        },
-                      }));
-                    })
-                  }
-                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2"
+                  onClick={() => {
+                    console.log('🎬 Botón Iniciar presionado para cámara:', activeCameraId);
+                    startStreamPreview(activeCameraId);
+                  }}
+                  disabled={activeStreamStatus?.status === 'connecting'}
+                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  Iniciar
+                  {activeStreamStatus?.status === 'connecting' ? 'Conectando...' : 'Iniciar'}
                 </button>
               ) : (
                 <button
@@ -258,18 +235,32 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
             </div>
           </div>
 
-          {activeHlsPath ? (
+          {/* Siempre renderizar VideoPreview para evitar glitches */}
+          {fullHlsUrl ? (
             <VideoPreview
+              key={`camera-${activeCameraId}`}
               cameraId={activeCameraId}
-              cameraName={activeCamera.name}
-              hlsUrl={new URL(activeHlsPath, apiUrl).href}
-              onStatusChange={(status) => handleCameraStatusChange(activeCameraId, status)}
+              cameraName={activeCamera?.name || 'Cámara sin nombre'}
+              hlsUrl={fullHlsUrl}
+              onStatusChange={handleActiveCameraStatusChange}
               showControls={true}
               autoPlay={true}
             />
           ) : (
             <div className="bg-gray-900 rounded-lg aspect-video flex items-center justify-center">
-              <p className="text-gray-400">Haz clic en "Iniciar" para ver el stream</p>
+              {activeStreamStatus?.status === 'connecting' ? (
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                  <p className="text-gray-400">Conectando al stream...</p>
+                </div>
+              ) : activeStreamStatus?.status === 'retrying' ? (
+                <div className="text-center">
+                  <div className="animate-pulse text-yellow-500 mb-2">🔄</div>
+                  <p className="text-gray-400">{activeStreamStatus.error}</p>
+                </div>
+              ) : (
+                <p className="text-gray-400">Haz clic en "Iniciar" para ver el stream</p>
+              )}
             </div>
           )}
 
@@ -277,11 +268,15 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
           <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-600 dark:text-gray-400">IP:</span>
-              <span className="font-mono text-gray-900 dark:text-white">{activeCamera.ip}:{activeCamera.port}</span>
+              <span className="font-mono text-gray-900 dark:text-white">
+                {activeCamera?.ip || 'N/A'}:{activeCamera?.port || 'N/A'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-600 dark:text-gray-400">Ruta RTSP:</span>
-              <span className="font-mono text-gray-900 dark:text-white text-xs">{activeCamera.path || '/stream'}</span>
+              <span className="font-mono text-gray-900 dark:text-white text-xs">
+                {activeCamera?.path || '/stream'}
+              </span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-gray-600 dark:text-gray-400">Estado:</span>
@@ -313,7 +308,7 @@ const RTSPCameraGallery = ({ apiUrl, configuredCameras = [], cameraConfig = {} }
             )}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Galería de Cámaras */}
       {cameras.length > 1 && (

@@ -2,6 +2,8 @@ const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const path = require('path');
 const fs = require('fs');
+const rtspConfig = require('../config/rtsp.config');
+const rtspLogger = require('../utils/rtsp-logger');
 
 /**
  * Servicio para manejar streams RTSP con auto-reconexión
@@ -11,9 +13,7 @@ class RTSPStreamService extends EventEmitter {
   constructor() {
     super();
     this.streams = new Map(); // Map<cameraId, { process, url, status, attempts, maxAttempts }>
-    this.maxReconnectAttempts = 5;
-    this.reconnectDelay = 3000; // 3 segundos
-    this.outputDir = path.join(__dirname, '../../public/hls');
+    this.outputDir = path.resolve(rtspConfig.hls.outputDir);
   }
 
   /**
@@ -41,8 +41,14 @@ class RTSPStreamService extends EventEmitter {
   /**
    * Iniciar stream de una cámara
    */
-  async startStream(cameraId, camera) {
+  async startStream(cameraId, camera, options = {}) {
     try {
+      // Validar configuración de cámara
+      const validation = rtspConfig.validateCameraConfig(camera);
+      if (!validation.isValid) {
+        throw new Error(`Configuración de cámara inválida: ${validation.errors.join(', ')}`);
+      }
+
       await this.initializeOutputDir();
 
       const rtspUrl = this.buildRTSPUrl(camera);
@@ -62,10 +68,12 @@ class RTSPStreamService extends EventEmitter {
         hlsUrl,
         status: 'connecting',
         attempts: 0,
-        maxAttempts: this.maxReconnectAttempts,
+        maxAttempts: rtspConfig.ffmpeg.reconnect.maxAttempts,
         process: null,
         lastError: null,
-        createdAt: new Date()
+        createdAt: new Date(),
+        quality: options.quality || 'medium',
+        options: options
       };
 
       this.streams.set(cameraId, streamData);
@@ -73,17 +81,27 @@ class RTSPStreamService extends EventEmitter {
       // Iniciar proceso ffmpeg
       this._startFFmpegProcess(cameraId, streamData);
 
-      console.log(`📹 Stream iniciado para cámara ${cameraId}: ${rtspUrl}`);
+      if (rtspConfig.logging.logConnections) {
+        rtspLogger.connection(`Stream iniciado para cámara ${cameraId}`, cameraId, {
+          rtspUrl,
+          quality: streamData.quality
+        });
+      }
       this.emit('stream:started', { cameraId, hlsUrl });
 
       return { 
         success: true, 
         hlsUrl, 
         cameraId,
-        message: 'Stream iniciado correctamente'
+        message: 'Stream iniciado correctamente',
+        quality: streamData.quality
       };
     } catch (error) {
-      console.error(`❌ Error al iniciar stream para cámara ${cameraId}:`, error);
+      rtspLogger.error(`Error al iniciar stream para cámara ${cameraId}`, {
+        cameraId,
+        error: error.message,
+        stack: error.stack
+      });
       this.emit('stream:error', { cameraId, error: error.message });
       throw error;
     }
@@ -94,41 +112,39 @@ class RTSPStreamService extends EventEmitter {
    */
   _startFFmpegProcess(cameraId, streamData) {
     try {
-      const { rtspUrl, hlsPath } = streamData;
+      const { rtspUrl, hlsPath, quality, options } = streamData;
 
-      // Argumentos de ffmpeg optimizados para RTSP a HLS
-      const ffmpegArgs = [
-        '-rtsp_transport', 'tcp',           // Usar TCP en lugar de UDP para mejor confiabilidad
-        '-i', rtspUrl,                      // Input RTSP
-        '-c:v', 'libx264',                  // Video codec
-        '-preset', 'ultrafast',             // Velocidad de encoding
-        '-b:v', '2500k',                    // Bitrate de video
-        '-c:a', 'aac',                      // Audio codec
-        '-b:a', '128k',                     // Bitrate de audio
-        '-hls_time', '2',                   // Duración de cada segmento
-        '-hls_list_size', '5',              // Número de segmentos en la playlist
-        '-hls_flags', 'delete_segments',    // Eliminar segmentos antiguos
-        '-f', 'hls',                        // Formato HLS
-        '-y',                               // Sobrescribir archivos
-        hlsPath                             // Output
-      ];
+      // Usar configuración centralizada con opciones específicas
+      const ffmpegArgs = rtspConfig.buildFFmpegArgs(rtspUrl, hlsPath, quality, options);
+
+      rtspLogger.ffmpeg(`Iniciando proceso para cámara ${cameraId}`, cameraId, {
+        args: ffmpegArgs.join(' '),
+        quality,
+        options
+      });
 
       const ffmpegProcess = spawn('ffmpeg', ffmpegArgs, {
-        stdio: ['ignore', 'pipe', 'pipe']  // No stdin, capturar stdout y stderr
+        stdio: rtspConfig.logging.enableFFmpegLogs ? 'inherit' : ['ignore', 'pipe', 'pipe']
       });
 
       streamData.process = ffmpegProcess;
       streamData.status = 'connecting';
 
-      // Manejar salida
-      ffmpegProcess.stderr.on('data', (data) => {
-        const output = data.toString();
-        console.log(`[FFmpeg ${cameraId}]:`, output.substring(0, 100));
-      });
+      // Manejar salida solo si los logs están habilitados
+      if (rtspConfig.logging.enableFFmpegLogs) {
+        ffmpegProcess.stderr.on('data', (data) => {
+          const output = data.toString();
+          rtspLogger.ffmpeg(`Output: ${output.substring(0, 100)}`, cameraId);
+        });
+      }
 
       // Manejar cierre del proceso
       ffmpegProcess.on('close', (code) => {
-        console.log(`⚠️  Proceso ffmpeg para cámara ${cameraId} cerrado con código: ${code}`);
+        rtspLogger.warn(`Proceso ffmpeg cerrado`, cameraId, {
+          exitCode: code,
+          status: streamData.status
+        });
+
         streamData.status = 'disconnected';
 
         // Intentar reconectar
@@ -137,24 +153,32 @@ class RTSPStreamService extends EventEmitter {
 
       // Manejar errores del proceso
       ffmpegProcess.on('error', (err) => {
-        console.error(`❌ Error en proceso ffmpeg para cámara ${cameraId}:`, err);
+        rtspLogger.error(`Error en proceso ffmpeg`, cameraId, {
+          error: err.message,
+          stack: err.stack
+        });
+
         streamData.status = 'error';
         streamData.lastError = err.message;
         this._attemptReconnect(cameraId, streamData);
       });
 
-      // Considerar stream conectado después de 2 segundos (tiempo para inicializar)
+      // Considerar stream conectado después de un tiempo configurable
       setTimeout(() => {
         if (streamData.process && !streamData.process.killed && streamData.status !== 'error') {
           streamData.status = 'connected';
           streamData.attempts = 0; // Reset intentos
           this.emit('stream:connected', { cameraId, hlsUrl: streamData.hlsUrl });
-          console.log(`✅ Stream conectado para cámara ${cameraId}`);
+          rtspLogger.connection(`Stream conectado exitosamente`, cameraId);
         }
-      }, 2000);
+      }, 3000); // 3 segundos para inicializar
 
     } catch (error) {
-      console.error(`❌ Error al crear proceso ffmpeg para cámara ${cameraId}:`, error);
+      rtspLogger.error(`Error al crear proceso ffmpeg`, cameraId, {
+        error: error.message,
+        stack: error.stack
+      });
+
       streamData.status = 'error';
       streamData.lastError = error.message;
       this._attemptReconnect(cameraId, streamData);
@@ -167,13 +191,22 @@ class RTSPStreamService extends EventEmitter {
   _attemptReconnect(cameraId, streamData) {
     streamData.attempts += 1;
 
-    if (streamData.attempts <= streamData.maxAttempts) {
-      console.log(`🔄 Intentando reconectar cámara ${cameraId} (intento ${streamData.attempts}/${streamData.maxAttempts})...`);
-      
+    if (streamData.attempts <= rtspConfig.ffmpeg.reconnect.maxAttempts) {
+      // Calcular delay con exponential backoff
+      const delay = Math.min(
+        rtspConfig.ffmpeg.reconnect.initialDelay * Math.pow(rtspConfig.ffmpeg.reconnect.backoffMultiplier, streamData.attempts - 1),
+        rtspConfig.ffmpeg.reconnect.maxDelay
+      );
+
+      rtspLogger.reconnect(`Intentando reconectar`, cameraId, streamData.attempts, {
+        delay,
+        lastError: streamData.lastError
+      });
+
       this.emit('stream:reconnecting', { 
         cameraId, 
         attempt: streamData.attempts,
-        maxAttempts: streamData.maxAttempts
+        maxAttempts: rtspConfig.ffmpeg.reconnect.maxAttempts
       });
 
       // Esperar antes de reconectar
@@ -184,9 +217,13 @@ class RTSPStreamService extends EventEmitter {
             this._startFFmpegProcess(cameraId, data);
           }
         }
-      }, this.reconnectDelay);
+      }, delay);
     } else {
-      console.error(`❌ Se alcanzó el máximo de intentos de reconexión para cámara ${cameraId}`);
+      rtspLogger.error(`Máximo de reintentos alcanzado`, cameraId, {
+        attempts: streamData.attempts,
+        lastError: streamData.lastError
+      });
+
       streamData.status = 'failed';
       this.emit('stream:failed', { 
         cameraId, 

@@ -182,6 +182,53 @@ router.put('/:id', rtspCameraController.updateCamera.bind(rtspCameraController))
 /**
  * @swagger
  * /api/rtsp/cameras/{id}:
+ *   patch:
+ *     summary: Actualizar parcialmente una cámara RTSP (PATCH)
+ *     tags: [RTSP Cameras]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               ip:
+ *                 type: string
+ *               port:
+ *                 type: integer
+ *               username:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               path:
+ *                 type: string
+ *               protocol:
+ *                 type: string
+ *               enabled:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Cámara RTSP actualizada exitosamente
+ *       404:
+ *         description: Cámara no encontrada
+ *       409:
+ *         description: Ya existe una cámara con ese nombre
+ *       500:
+ *         description: Error interno del servidor
+ */
+router.patch('/:id', rtspCameraController.updateCamera.bind(rtspCameraController));
+
+/**
+ * @swagger
+ * /api/rtsp/cameras/{id}:
  *   delete:
  *     summary: Eliminar una cámara RTSP
  *     tags: [RTSP Cameras]
@@ -322,5 +369,7 @@ router.post('/:id/toggle', rtspCameraController.toggleCamera.bind(rtspCameraCont
  *         description: Error interno del servidor
  */
 router.get('/:id/stream-info', rtspCameraController.getStreamInfo.bind(rtspCameraController));
+
+module.exports = router;
 
 module.exports = router;

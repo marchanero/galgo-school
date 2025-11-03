@@ -1,4 +1,5 @@
 const { getDatabase } = require('../config/database');
+const rtspConfig = require('../config/rtsp.config');
 
 class RTSPService {
   constructor() {
@@ -9,9 +10,12 @@ class RTSPService {
    * Construir URL RTSP completa
    */
   buildRTSPUrl(camera) {
-    let rtspUrl = `rtsp://${camera.ip}:${camera.port}${camera.path}`;
+    const port = camera.port || rtspConfig.rtsp.defaultPort;
+    const path = camera.path || rtspConfig.rtsp.defaultPath;
+    
+    let rtspUrl = `rtsp://${camera.ip}:${port}${path}`;
     if (camera.username && camera.password) {
-      rtspUrl = `rtsp://${camera.username}:${camera.password}@${camera.ip}:${camera.port}${camera.path}`;
+      rtspUrl = `rtsp://${camera.username}:${camera.password}@${camera.ip}:${port}${path}`;
     }
     return rtspUrl;
   }
@@ -25,19 +29,35 @@ class RTSPService {
       const url = require('url');
 
       try {
+        // Validar configuración antes de probar
+        const validation = rtspConfig.validateCameraConfig(camera);
+        if (!validation.isValid) {
+          resolve({
+            success: false,
+            status: 'error',
+            message: `Configuración inválida: ${validation.errors.join(', ')}`,
+            rtsp_url: null
+          });
+          return;
+        }
+
         const rtspUrl = this.buildRTSPUrl(camera);
         const parsedUrl = url.parse(rtspUrl);
 
-        console.log(`🔍 Probando conexión RTSP: ${rtspUrl}`);
+        if (rtspConfig.logging.logConnections) {
+          console.log(`🔍 Probando conexión RTSP: ${rtspUrl}`);
+        }
 
         const socket = net.createConnection({
           host: parsedUrl.hostname,
-          port: parseInt(parsedUrl.port) || 554,
-          timeout: 5000 // 5 segundos timeout
+          port: parseInt(parsedUrl.port) || rtspConfig.rtsp.defaultPort,
+          timeout: rtspConfig.rtsp.connectionTimeout
         });
 
         socket.on('connect', () => {
-          console.log(`✅ Conexión TCP exitosa a ${camera.ip}:${camera.port}`);
+          if (rtspConfig.logging.logConnections) {
+            console.log(`✅ Conexión TCP exitosa a ${camera.ip}:${camera.port || rtspConfig.rtsp.defaultPort}`);
+          }
 
           // Enviar comando OPTIONS RTSP básico
           const optionsCommand = `OPTIONS ${rtspUrl} RTSP/1.0\r\nCSeq: 1\r\n\r\n`;
@@ -46,7 +66,9 @@ class RTSPService {
           // Esperar respuesta
           socket.on('data', (data) => {
             const response = data.toString();
-            console.log(`📡 Respuesta RTSP: ${response.substring(0, 100)}...`);
+            if (rtspConfig.logging.enableFFmpegLogs) {
+              console.log(`📡 Respuesta RTSP: ${response.substring(0, 100)}...`);
+            }
 
             if (response.includes('RTSP/1.0 200 OK')) {
               socket.end();
@@ -73,7 +95,7 @@ class RTSPService {
           resolve({
             success: false,
             status: 'timeout',
-            message: 'Timeout en conexión RTSP',
+            message: `Timeout en conexión RTSP (${rtspConfig.rtsp.connectionTimeout}ms)`,
             rtsp_url: rtspUrl
           });
         });
@@ -112,12 +134,14 @@ class RTSPService {
         const rtspUrl = this.buildRTSPUrl(camera);
         const parsedUrl = url.parse(rtspUrl);
 
-        console.log(`📋 Obteniendo información del stream: ${rtspUrl}`);
+        if (rtspConfig.logging.logConnections) {
+          console.log(`📋 Obteniendo información del stream: ${rtspUrl}`);
+        }
 
         const socket = net.createConnection({
           host: parsedUrl.hostname,
-          port: parseInt(parsedUrl.port) || 554,
-          timeout: 5000
+          port: parseInt(parsedUrl.port) || rtspConfig.rtsp.defaultPort,
+          timeout: rtspConfig.rtsp.streamInfoTimeout
         });
 
         let sessionId = null;
@@ -137,7 +161,9 @@ class RTSPService {
 
         socket.on('data', (data) => {
           const response = data.toString();
-          console.log(`📄 Respuesta DESCRIBE: ${response.substring(0, 200)}...`);
+          if (rtspConfig.logging.enableFFmpegLogs) {
+            console.log(`📄 Respuesta DESCRIBE: ${response.substring(0, 200)}...`);
+          }
 
           if (response.includes('RTSP/1.0 200 OK')) {
             // Extraer información del SDP
@@ -184,7 +210,7 @@ class RTSPService {
           resolve({
             success: false,
             stream_info: null,
-            message: 'Timeout al obtener información del stream'
+            message: `Timeout al obtener información del stream (${rtspConfig.rtsp.streamInfoTimeout}ms)`
           });
         });
 
@@ -211,8 +237,13 @@ class RTSPService {
   /**
    * Iniciar retransmisión RTSP (relay)
    */
-  async startStreamRelay(cameraId, outputPort = 8554) {
+  async startStreamRelay(cameraId, outputPort = rtspConfig.relay.defaultOutputPort) {
     try {
+      // Verificar límite de relays concurrentes
+      if (this.activeStreams.size >= rtspConfig.relay.maxConcurrentRelays) {
+        throw new Error(`Máximo de relays concurrentes alcanzado (${rtspConfig.relay.maxConcurrentRelays})`);
+      }
+
       const db = getDatabase();
       const camera = await new Promise((resolve, reject) => {
         db.get('SELECT * FROM cameras WHERE id = ?', [cameraId], (err, row) => {
@@ -229,9 +260,11 @@ class RTSPService {
 
       // Aquí implementaríamos la lógica de retransmisión usando ffmpeg o similar
       // Por ahora, solo simulamos
-      console.log(`🎬 Iniciando retransmisión RTSP para cámara ${camera.name}`);
-      console.log(`📡 URL fuente: ${rtspUrl}`);
-      console.log(`📡 Puerto salida: ${outputPort}`);
+      if (rtspConfig.logging.logConnections) {
+        console.log(`🎬 Iniciando retransmisión RTSP para cámara ${camera.name}`);
+        console.log(`📡 URL fuente: ${rtspUrl}`);
+        console.log(`📡 Puerto salida: ${outputPort}`);
+      }
 
       // Marcar como activo en memoria
       this.activeStreams.set(cameraId, {
